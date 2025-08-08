@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: Fingbel Raid Tool
+## Notes: Modular raid helper (Vanilla 1.12)
+## Author: FingBel
+## Version: 0.1.0
+## SavedVariables: FRT_Saved
+
+FingbelRaidTool.lua
