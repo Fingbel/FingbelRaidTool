@@ -1,4 +1,4 @@
--- Fingbel Raid Tool (Vanilla 1.12) — No Lock UI Version
+-- Fingbel Raid Tool (Vanilla 1.12)
 -- SavedVariables: FRT_Saved
 
 -- ===============================
@@ -64,7 +64,6 @@ f:SetScript("OnEvent", function()
         if prefix == ADDON_PREFIX and sender ~= UnitName("player") then
             FRT_Saved.note = tostring(message or "")
             FRT_Print("Note from " .. (sender or "unknown") .. ": " .. FRT_Saved.note)
-            -- update UI
             if FRT_UpdateViewerText then FRT_UpdateViewerText() end
             if FRT_Saved.ui.viewer.autoOpen and FRT_ShowViewer then FRT_ShowViewer() end
         end
@@ -111,6 +110,7 @@ SlashCmdList["FRT"] = function(msg)
         FRT_Print("  /frt view         - open read-only viewer")
         FRT_Print("  /frt editor       - open editor (leader/assist)")
         FRT_Print("  /frt autoopen on|off - auto-open viewer when note arrives")
+        FRT_Print("  /frt lock [on|off]  - lock/unlock viewer move/resize")
     end
 end
 
@@ -143,6 +143,36 @@ FRT_Viewer:SetScript("OnDragStop", function()
     end
 end)
 FRT_Viewer:SetClampedToScreen(true)
+
+-- Make resizable + handle
+if FRT_Viewer.SetResizable then FRT_Viewer:SetResizable(true) end
+if FRT_Viewer.SetMinResize then FRT_Viewer:SetMinResize(240, 120) end
+
+FRT_Viewer:SetScript("OnSizeChanged", function()
+    local w = FRT_Viewer:GetWidth()
+    local h = FRT_Viewer:GetHeight()
+    if w and h then
+        FRT_Saved.ui.viewer.w = w
+        FRT_Saved.ui.viewer.h = h
+    end
+    if FRT_UpdateViewerText then FRT_UpdateViewerText() end
+end)
+
+local vresize = CreateFrame("Button", nil, FRT_Viewer)
+vresize:SetWidth(16); vresize:SetHeight(16)
+vresize:SetPoint("BOTTOMRIGHT", -6, 6)
+vresize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+vresize:SetScript("OnMouseDown", function()
+    if not FRT_Saved.ui.viewer.locked then
+        FRT_Viewer:StartSizing("BOTTOMRIGHT")
+    end
+end)
+vresize:SetScript("OnMouseUp", function()
+    FRT_Viewer:StopMovingOrSizing()
+end)
+
 FRT_Viewer:Hide()
 
 local vt = FRT_Viewer:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -150,43 +180,31 @@ vt:SetPoint("TOP", 0, -10)
 vt:SetText("FRT — Raid Note")
 
 local vtext = FRT_Viewer:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-local vtext = FRT_Viewer:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 vtext:SetPoint("TOPLEFT", 18, -36)
 vtext:SetWidth((FRT_Viewer:GetWidth() or 320) - 36)
 vtext:SetJustifyH("LEFT")
 vtext:SetJustifyV("TOP")
 vtext:SetNonSpaceWrap(true)
 vtext:SetText("")
-vtext:SetPoint("RIGHT", -18, 0)
-vtext:SetJustifyH("LEFT")
-vtext:SetJustifyV("TOP")
-vtext:SetText("")
-vtext:SetNonSpaceWrap(true)
 
--- Small lock toggle (checkbox) in top-left
+-- Small lock toggle (checkbox) + label
 local vlock = CreateFrame("CheckButton", "FRT_ViewerLock", FRT_Viewer, "UICheckButtonTemplate")
 vlock:SetWidth(18); vlock:SetHeight(18)
 vlock:SetPoint("TOPLEFT", 6, -6)
-
--- Hide default label from template
-local vlockText = getglobal(vlock:GetName().."Text")
-if vlockText then vlockText:Hide() end
-
--- Add our own label for clarity
+local vlockText = getglobal(vlock:GetName().."Text"); if vlockText then vlockText:Hide() end
 local vlockLabel = FRT_Viewer:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 vlockLabel:SetPoint("LEFT", vlock, "RIGHT", 4, 0)
 vlockLabel:SetText("Lock")
-
--- Make sure the checkbox is always on top
 vlock:SetFrameLevel(FRT_Viewer:GetFrameLevel() + 5)
-
--- Init state
 vlock:SetChecked(FRT_Saved.ui.viewer.locked and 1 or 0)
 
--- Click handler
+function FRT_RefreshLockIcon()
+    vlock:SetChecked(FRT_Saved.ui.viewer.locked and 1 or 0)
+end
+
 vlock:SetScript("OnClick", function()
     FRT_Saved.ui.viewer.locked = not FRT_Saved.ui.viewer.locked
-    vlock:SetChecked(FRT_Saved.ui.viewer.locked and 1 or 0)
+    FRT_RefreshLockIcon()
     FRT_Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
 end)
 
@@ -196,13 +214,19 @@ vclose:SetPoint("TOPRIGHT", -5, -5)
 function FRT_UpdateViewerText()
     local w = (FRT_Viewer:GetWidth() or 320) - 36
     if w < 50 then w = 50 end
-    vtext:SetWidth(w)
+    if vtext and vtext.SetWidth then vtext:SetWidth(w) end
+    vtext:SetJustifyH("LEFT")
+    vtext:SetJustifyV("TOP")
     vtext:SetText(tostring(FRT_Saved.note or ""))
 end
 
 function FRT_ShowViewer()
     FRT_Viewer:Show()
     local sv = FRT_Saved.ui.viewer
+    if type(sv.w) == "number" and type(sv.h) == "number" then
+        FRT_Viewer:SetWidth(sv.w)
+        FRT_Viewer:SetHeight(sv.h)
+    end
     if type(sv.x) == "number" and type(sv.y) == "number" then
         FRT_SafeSetPoint(FRT_Viewer, "TOPLEFT", UIParent, "BOTTOMLEFT", sv.x, sv.y)
     else
@@ -244,6 +268,24 @@ FRT_Editor:SetScript("OnDragStop", function()
     end
 end)
 FRT_Editor:SetClampedToScreen(true)
+
+-- Make resizable + handle
+if FRT_Editor.SetResizable then FRT_Editor:SetResizable(true) end
+if FRT_Editor.SetMinResize then FRT_Editor:SetMinResize(320, 180) end
+
+local eresize = CreateFrame("Button", nil, FRT_Editor)
+eresize:SetWidth(16); eresize:SetHeight(16)
+eresize:SetPoint("BOTTOMRIGHT", -6, 6)
+eresize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+eresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+eresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+eresize:SetScript("OnMouseDown", function()
+    FRT_Editor:StartSizing("BOTTOMRIGHT")
+end)
+eresize:SetScript("OnMouseUp", function()
+    FRT_Editor:StopMovingOrSizing()
+end)
+
 FRT_Editor:Hide()
 
 local et = FRT_Editor:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -269,7 +311,7 @@ editBG:SetBackdropColor(0,0,0,0.5)
 local edit = CreateFrame("EditBox", "FRT_EditorEditBox", scroll)
 edit:SetMultiLine(true)
 edit:SetAutoFocus(false)
-edit:SetWidth(360)
+edit:SetWidth((FRT_Editor:GetWidth() or 420) - 60) -- dynamic wrap width
 edit:SetHeight(180)
 edit:SetFontObject("ChatFontNormal")
 edit:SetTextInsets(4,4,4,4)
@@ -293,6 +335,17 @@ scroll:SetScript("OnMouseWheel", function()
   local step = 20
   local delta = arg1 or 0
   sb:SetValue(sb:GetValue() - delta * step)
+end)
+
+-- Keep edit wrapping width in sync with editor size + save size
+FRT_Editor:SetScript("OnSizeChanged", function()
+    local w = FRT_Editor:GetWidth()
+    local h = FRT_Editor:GetHeight()
+    if w and h then
+        FRT_Saved.ui.editor.w = w
+        FRT_Saved.ui.editor.h = h
+        edit:SetWidth(w - 60)
+    end
 end)
 
 -- Buttons
@@ -348,7 +401,18 @@ local function FRT_ShowEditor()
     edit:SetText(tostring(FRT_Saved.note or ""))
     edit:SetFocus()
     FRT_Editor:Show()
+
     local sv = FRT_Saved.ui.editor
+    -- Apply saved size first (so wrapping width is correct)
+    if type(sv.w) == "number" and type(sv.h) == "number" then
+        FRT_Editor:SetWidth(sv.w)
+        FRT_Editor:SetHeight(sv.h)
+        edit:SetWidth(sv.w - 60)
+    else
+        edit:SetWidth((FRT_Editor:GetWidth() or 420) - 60)
+    end
+
+    -- Restore position
     if type(sv.x) == "number" and type(sv.y) == "number" then
         FRT_SafeSetPoint(FRT_Editor, "TOPLEFT", UIParent, "BOTTOMLEFT", sv.x, sv.y)
     else
@@ -398,7 +462,7 @@ SlashCmdList["FRT"] = function(msg)
     end
 
     local before = tostring(FRT_Saved.note or "")
-    _BaseSlash(msg) -- delegate to data commands
+    _BaseSlash(msg)
     local after = tostring(FRT_Saved.note or "")
     if before ~= after then
         FRT_UpdateViewerText()
