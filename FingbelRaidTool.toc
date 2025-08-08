@@ -6,3 +6,4 @@
 ## SavedVariables: FRT_Saved
 
 FingbelRaidTool.lua
+modules\note\FRT_Note.lua
