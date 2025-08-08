@@ -158,12 +158,49 @@ FRT_Viewer:SetScript("OnSizeChanged", function()
     if FRT_UpdateViewerText then FRT_UpdateViewerText() end
 end)
 
+-- Bottom-right resize handle (drawn outside, diagonal)
 local vresize = CreateFrame("Button", nil, FRT_Viewer)
 vresize:SetWidth(16); vresize:SetHeight(16)
-vresize:SetPoint("BOTTOMRIGHT", -6, 6)
-vresize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+-- push it OUTSIDE the frame: positive x, negative y from BOTTOMRIGHT
+vresize:SetPoint("BOTTOMRIGHT", 10, -10)
+vresize:SetFrameLevel(FRT_Viewer:GetFrameLevel() + 10)
+
+-- subtle but visible style
+vresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+vresize:GetNormalTexture():SetVertexColor(1, 1, 1, 0.9)
 vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+
+-- hover reveal
+vresize:SetAlpha(0.4)
+vresize:SetScript("OnEnter", function() vresize:SetAlpha(1) end)
+vresize:SetScript("OnLeave", function() vresize:SetAlpha(0.4) end)
+
+-- sizing (guarded by lock)
+vresize:SetScript("OnMouseDown", function()
+    if not FRT_Saved.ui.viewer.locked then
+        FRT_Viewer:StartSizing("BOTTOMRIGHT")
+    end
+end)
+vresize:SetScript("OnMouseUp", function()
+    FRT_Viewer:StopMovingOrSizing()
+end)
+-- show/hide based on lock
+function FRT_UpdateViewerLockUI()
+    if FRT_Saved.ui.viewer.locked then
+        vresize:Hide()
+    else
+        vresize:Show()
+    end
+    -- keep checkbox in sync if present
+    if FRT_ViewerLock and FRT_ViewerLock.SetChecked then
+        FRT_ViewerLock:SetChecked(FRT_Saved.ui.viewer.locked and 1 or 0)
+    end
+end
+
+-- call once on init
+FRT_UpdateViewerLockUI()
+
 vresize:SetScript("OnMouseDown", function()
     if not FRT_Saved.ui.viewer.locked then
         FRT_Viewer:StartSizing("BOTTOMRIGHT")
@@ -204,7 +241,7 @@ end
 
 vlock:SetScript("OnClick", function()
     FRT_Saved.ui.viewer.locked = not FRT_Saved.ui.viewer.locked
-    FRT_RefreshLockIcon()
+    FRT_UpdateViewerLockUI()
     FRT_Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
 end)
 
@@ -232,6 +269,7 @@ function FRT_ShowViewer()
     else
         FRT_SafeSetPoint(FRT_Viewer, "CENTER", UIParent, "CENTER", 0, 0)
     end
+    FRT_UpdateViewerLockUI()
     FRT_UpdateViewerText()
 end
 
@@ -275,10 +313,18 @@ if FRT_Editor.SetMinResize then FRT_Editor:SetMinResize(320, 180) end
 
 local eresize = CreateFrame("Button", nil, FRT_Editor)
 eresize:SetWidth(16); eresize:SetHeight(16)
-eresize:SetPoint("BOTTOMRIGHT", -6, 6)
-eresize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+eresize:SetPoint("BOTTOMRIGHT", 10, -10)
+eresize:SetFrameLevel(FRT_Editor:GetFrameLevel() + 10)
+
+eresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+eresize:GetNormalTexture():SetVertexColor(1, 1, 1, 1)
 eresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 eresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+
+eresize:SetAlpha(0.4)
+eresize:SetScript("OnEnter", function() eresize:SetAlpha(1) end)
+eresize:SetScript("OnLeave", function() eresize:SetAlpha(0.4) end)
+
 eresize:SetScript("OnMouseDown", function()
     FRT_Editor:StartSizing("BOTTOMRIGHT")
 end)
@@ -457,8 +503,9 @@ SlashCmdList["FRT"] = function(msg)
             FRT_Saved.ui.viewer.locked = not FRT_Saved.ui.viewer.locked
         end
         if type(FRT_RefreshLockIcon) == "function" then FRT_RefreshLockIcon() end
+        FRT_UpdateViewerLockUI()
         FRT_Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
-        return
+    return
     end
 
     local before = tostring(FRT_Saved.note or "")
