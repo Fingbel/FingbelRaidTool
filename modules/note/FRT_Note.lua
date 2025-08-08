@@ -1,10 +1,11 @@
--- Fingbel Raid Tool - Note Module (no colon syntax)
+-- Fingbel Raid Tool - Note Module (embedded editor pane)
 -- Requires core FingbelRaidTool.lua (defines FRT)
+-- Optional: FingbelRaidEditor.lua (global editor host with left-side tabs)
 
 local safePrint = (FRT and FRT.Print) or function(msg)
   DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. tostring(msg))
 end
-safePrint("FRTNote.lua loaded")
+safePrint("FRT_Note.lua loaded")
 
 local Note = {}
 Note.name = "Note"
@@ -21,7 +22,7 @@ local function EnsureSaved()
 end
 
 -- ===============================
--- Helpers
+-- Helpers (1.12/Turtle WoW APIs)
 -- ===============================
 local function IsLeaderOrOfficer()
   if (GetNumRaidMembers() or 0) > 0 then
@@ -32,7 +33,7 @@ local function IsLeaderOrOfficer()
 end
 
 -- ===============================
--- Viewer UI (read-only)
+-- Viewer UI (read-only; unchanged)
 -- ===============================
 local viewer, vtext, vresize, vlock
 
@@ -159,62 +160,26 @@ local function BuildViewer()
   UpdateViewerLockUI()
 end
 
--- ===============================
--- Editor UI (leaders/officers)
--- ===============================
-local editor, edit, eresize, scroll
+-- =====================================================
+-- Embedded Editor Pane (inside global Fingbel Raid Editor)
+-- =====================================================
+-- Note: No standalone top-level editor frame anymore.
+--       We register a builder that fills a pane inside the global editor.
 
-local function BuildEditor()
-  editor = CreateFrame("Frame", "FRT_Editor", UIParent)
-  editor:SetWidth(420); editor:SetHeight(260)
-  editor:SetFrameStrata("DIALOG")
-  editor:SetBackdrop({
-    bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile = true, tileSize = 32, edgeSize = 32,
-    insets = { left = 11, right = 12, top = 12, bottom = 11 }
-  })
-  editor:EnableMouse(true)
-  editor:SetMovable(true)
-  editor:RegisterForDrag("LeftButton")
-  editor:SetScript("OnDragStart", function() editor:StartMoving() end)
-  editor:SetScript("OnDragStop", function()
-    editor:StopMovingOrSizing()
-    local x, y = editor:GetLeft(), editor:GetTop()
-    if x and y then FRT_Saved.ui.editor.x = x; FRT_Saved.ui.editor.y = y end
-  end)
-  editor:SetClampedToScreen(true)
+local function BuildNoteEditorPane(parent)
+  -- Title
+  local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  title:SetPoint("TOPLEFT", 0, 0)
+  title:SetText("Raid Note — Editor")
 
-  if editor.SetResizable then editor:SetResizable(true) end
-  if editor.SetMinResize then editor:SetMinResize(320, 180) end
+  -- Scroll area + background
+  local scroll = CreateFrame("ScrollFrame", "FRT_NoteEditorScroll", parent, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 0, -24)
+  scroll:SetPoint("BOTTOMRIGHT", -120, 36)
 
-  eresize = CreateFrame("Button", nil, editor)
-  eresize:SetWidth(16); eresize:SetHeight(16)
-  eresize:SetPoint("BOTTOMRIGHT", 10, -10)
-  eresize:SetFrameLevel(editor:GetFrameLevel() + 10)
-  eresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  eresize:GetNormalTexture():SetVertexColor(1,1,1,1)
-  eresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-  eresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-  eresize:SetAlpha(0.4)
-  eresize:SetScript("OnEnter", function() eresize:SetAlpha(1) end)
-  eresize:SetScript("OnLeave", function() eresize:SetAlpha(0.4) end)
-  eresize:SetScript("OnMouseDown", function() editor:StartSizing("BOTTOMRIGHT") end)
-  eresize:SetScript("OnMouseUp", function() editor:StopMovingOrSizing() end)
-
-  editor:Hide()
-
-  local et = editor:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  et:SetPoint("TOP", 0, -10)
-  et:SetText("FRT — Raid Note Editor")
-
-  scroll = CreateFrame("ScrollFrame", "FRT_EditorScroll", editor, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 18, -36)
-  scroll:SetPoint("BOTTOMRIGHT", -38, 46)
-
-  local editBG = CreateFrame("Frame", nil, editor)
-  editBG:SetPoint("TOPLEFT", 18, -36)
-  editBG:SetPoint("BOTTOMRIGHT", -38, 46)
+  local editBG = CreateFrame("Frame", nil, parent)
+  editBG:SetPoint("TOPLEFT", 0, -24)
+  editBG:SetPoint("BOTTOMRIGHT", -120, 36)
   editBG:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -223,11 +188,11 @@ local function BuildEditor()
   })
   editBG:SetBackdropColor(0,0,0,0.5)
 
-  edit = CreateFrame("EditBox", "FRT_EditorEditBox", scroll)
+  local edit = CreateFrame("EditBox", "FRT_NoteEditorEditBox", scroll)
   edit:SetMultiLine(true)
   edit:SetAutoFocus(false)
-  edit:SetWidth((editor:GetWidth() or 420) - 60)
-  edit:SetHeight(180)
+  edit:SetWidth(parent:GetWidth() - 140)
+  edit:SetHeight(200)
   edit:SetFontObject("ChatFontNormal")
   edit:SetTextInsets(4,4,4,4)
   edit:EnableMouse(true)
@@ -238,11 +203,11 @@ local function BuildEditor()
     local lines = 1
     for _ in string.gfind(text, "\n") do lines = lines + 1 end
     local h = lines * 16 + 12
-    if h < 180 then h = 180 end
+    if h < 200 then h = 200 end
     edit:SetHeight(h)
   end)
-  scroll:SetScrollChild(edit)
 
+  scroll:SetScrollChild(edit)
   scroll:EnableMouseWheel(true)
   scroll:SetScript("OnMouseWheel", function()
     local sb = getglobal(scroll:GetName() .. "ScrollBar")
@@ -252,29 +217,35 @@ local function BuildEditor()
     sb:SetValue(sb:GetValue() - delta * step)
   end)
 
-  editor:SetScript("OnSizeChanged", function()
-    local w = editor:GetWidth(); local h = editor:GetHeight()
-    if w and h then
-      FRT_Saved.ui.editor.w = w; FRT_Saved.ui.editor.h = h
-      edit:SetWidth(w - 60)
-    end
+  -- Resize behavior inside host pane
+  parent:SetScript("OnSizeChanged", function()
+    edit:SetWidth(parent:GetWidth() - 140)
+  end)
+  parent:SetScript("OnShow", function()
+    edit:SetWidth(parent:GetWidth() - 140)
+    edit:SetText(tostring(FRT_Saved.note or ""))
   end)
 
-  local esave = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
-  esave:SetWidth(80); esave:SetHeight(22)
-  esave:SetPoint("BOTTOMLEFT", 15, 15)
-  esave:SetText("Save")
-  esave:SetScript("OnClick", function()
+  -- Buttons (right column)
+  local save = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  save:SetWidth(96); save:SetHeight(22)
+  save:SetPoint("TOPRIGHT", 0, -24)
+  save:SetText("Save")
+  save:SetScript("OnClick", function()
+    if not IsLeaderOrOfficer() then
+      FRT.Print("Editor requires raid lead or assist.")
+      return
+    end
     FRT_Saved.note = edit:GetText() or ""
     FRT.Print("Saved note.")
     Note.UpdateViewerText(Note)
   end)
 
-  local eshare = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
-  eshare:SetWidth(80); eshare:SetHeight(22)
-  eshare:SetPoint("LEFT", esave, "RIGHT", 8, 0)
-  eshare:SetText("Share")
-  eshare:SetScript("OnClick", function()
+  local share = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  share:SetWidth(96); share:SetHeight(22)
+  share:SetPoint("TOPRIGHT", 0, -50)
+  share:SetText("Share")
+  share:SetScript("OnClick", function()
     local text = edit:GetText() or ""
     if text == "" then FRT.Print("Nothing to share."); return end
     if (GetNumRaidMembers() or 0) > 0 then
@@ -288,31 +259,22 @@ local function BuildEditor()
     end
   end)
 
-  local eclose = CreateFrame("Button", nil, editor, "UIPanelButtonTemplate")
-  eclose:SetWidth(80); eclose:SetHeight(22)
-  eclose:SetPoint("BOTTOMRIGHT", -15, 15)
-  eclose:SetText("Close")
-  eclose:SetScript("OnClick", function() editor:Hide() end)
+  local openViewer = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  openViewer:SetWidth(96); openViewer:SetHeight(22)
+  openViewer:SetPoint("TOPRIGHT", 0, -76)
+  openViewer:SetText("Open Viewer")
+  openViewer:SetScript("OnClick", function()
+    Note.ShowViewer(Note)
+  end)
 end
 
+-- Exposed helper so /frt editor routes to the global host
 function Note.ShowEditor(mod)
   if not IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
-  edit:SetText(tostring(FRT_Saved.note or ""))
-  edit:SetFocus()
-  editor:Show()
-
-  local sv = FRT_Saved.ui.editor
-  if type(sv.w) == "number" and type(sv.h) == "number" then
-    editor:SetWidth(sv.w); editor:SetHeight(sv.h)
-    edit:SetWidth(sv.w - 60)
+  if FRT and FRT.Editor and FRT.Editor.Show then
+    FRT.Editor.Show("Note")
   else
-    edit:SetWidth((editor:GetWidth() or 420) - 60)
-  end
-
-  if type(sv.x) == "number" and type(sv.y) == "number" then
-    FRT.SafeSetPoint(editor, "TOPLEFT", UIParent, "BOTTOMLEFT", sv.x, sv.y)
-  else
-    FRT.SafeSetPoint(editor, "CENTER", UIParent, "CENTER", 0, 0)
+    FRT.Print("Global editor not available.")
   end
 end
 
@@ -325,8 +287,13 @@ function Note.OnLoad(mod)
   EnsureSaved()
   FRT.RegisterAddonPrefix()
   BuildViewer()
-  BuildEditor()
 
+  -- Register our editor pane with the global editor host (if present)
+  if FRT and FRT.Editor and FRT.Editor.RegisterPanel then
+    FRT.Editor.RegisterPanel("Note", BuildNoteEditorPane, { title = "📝 Raid Note", order = 10 })
+  end
+
+  -- Listen for incoming addon notes
   ev:RegisterEvent("CHAT_MSG_ADDON")
   ev:SetScript("OnEvent", function()
     if event == "CHAT_MSG_ADDON" then
@@ -351,7 +318,7 @@ function Note.GetHelp(mod)
     "/frt share             - send note to raid/party",
     "/frt clear             - clear the note",
     "/frt view              - open read-only viewer",
-    "/frt editor            - open editor (leader/assist)",
+    "/frt editor            - open global editor on Note (lead/assist)",
     "/frt autoopen on|off   - toggle auto-open viewer",
     "/frt lock [on|off]     - lock/unlock viewer move/resize",
   }
