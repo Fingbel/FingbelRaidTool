@@ -82,32 +82,32 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   end
   -- 1.12 compat: shim UpdateScrollChildRect on this scrollframe
   if not scroll.UpdateScrollChildRect then
-  function scroll:UpdateScrollChildRect()
-    local c = self:GetScrollChild(); if not c then return end
-    local contentH = c:GetHeight() or 0
-    local viewH    = self:GetHeight() or 0
-    local max      = contentH - viewH
-    if max < 0 then max = 0 end
+    function scroll:UpdateScrollChildRect()
+      local c = self:GetScrollChild(); if not c then return end
+      local contentH = c:GetHeight() or 0
+      local viewH    = self:GetHeight() or 0
+      local max      = contentH - viewH
+      if max < 0 then max = 0 end
 
-    local name  = self:GetName() or ""
-    local sb    = getglobal(name .. "ScrollBar")
-    local up    = getglobal(name .. "ScrollBarScrollUpButton")   or getglobal(name .. "ScrollUpButton")
-    local down  = getglobal(name .. "ScrollBarScrollDownButton") or getglobal(name .. "ScrollDownButton")
+      local name  = self:GetName() or ""
+      local sb    = getglobal(name .. "ScrollBar")
+      local up    = getglobal(name .. "ScrollBarScrollUpButton")   or getglobal(name .. "ScrollUpButton")
+      local down  = getglobal(name .. "ScrollBarScrollDownButton") or getglobal(name .. "ScrollDownButton")
 
-    if sb then
-      local cur = sb:GetValue() or 0
-      sb:SetMinMaxValues(0, max)
-      if cur > max then cur = max end
-      sb:SetValue(cur)
+      if sb then
+        local cur = sb:GetValue() or 0
+        sb:SetMinMaxValues(0, max)
+        if cur > max then cur = max end
+        sb:SetValue(cur)
 
-      if max <= 0 then
-        sb:Hide(); if up then up:Hide() end; if down then down:Hide() end
-      else
-        sb:Show(); if up then up:Show() end; if down then down:Show() end
+        if max <= 0 then
+          sb:Hide(); if up then up:Hide() end; if down then down:Hide() end
+        else
+          sb:Show(); if up then up:Show() end; if down then down:Show() end
+        end
       end
     end
   end
-end
 
   -- Text widget: FontString for readonly (non-selectable), EditBox for editable
   local edit, text
