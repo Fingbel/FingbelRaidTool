@@ -261,3 +261,264 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
     GetText  = GetText,
   }
 end
+
+function FRT.Utils.CreateScrollable(parent, opts)
+  opts = opts or {}
+  local DEFAULT_FONT = opts.fontObject or "GameFontNormal"
+  local RIGHT_COL_W  = opts.rightColumnWidth or 18
+  local INSET_L      = (opts.insets and opts.insets.left)   or 4
+  local INSET_R      = (opts.insets and opts.insets.right)  or 4
+  local INSET_T      = (opts.insets and opts.insets.top)    or 4
+  local INSET_B      = (opts.insets and opts.insets.bottom) or 4
+
+  local root = CreateFrame("Frame", nil, parent)
+  root:SetAllPoints(parent)
+
+  FRT.Utils.__scroll_id = (FRT.Utils.__scroll_id or 0) + 1
+  local sfName = opts.name or ("FRT_Scroll"..FRT.Utils.__scroll_id)
+
+  local scroll = CreateFrame("ScrollFrame", sfName, root, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 0, 0)
+  scroll:SetPoint("BOTTOMRIGHT", -RIGHT_COL_W, 0)
+
+  -- 1.12 shim for UpdateScrollChildRect
+  if not scroll.UpdateScrollChildRect then
+    function scroll:UpdateScrollChildRect()
+      local c = self:GetScrollChild(); if not c then return end
+      local ch = c:GetHeight() or 0
+      local vh = self:GetHeight() or 0
+      local max = ch - vh; if max < 0 then max = 0 end
+      local name = self:GetName() or ""
+      local sb   = getglobal(name.."ScrollBar")
+      local up   = getglobal(name.."ScrollBarScrollUpButton")   or getglobal(name.."ScrollUpButton")
+      local down = getglobal(name.."ScrollBarScrollDownButton") or getglobal(name.."ScrollDownButton")
+      if sb then
+        local cur = sb:GetValue() or 0
+        sb:SetMinMaxValues(0, max)
+        if cur > max then cur = max end
+        sb:SetValue(cur)
+        if max <= 0 then sb:Hide(); if up then up:Hide() end; if down then down:Hide() end
+        else sb:Show(); if up then up:Show() end; if down then down:Show() end end
+      end
+    end
+  end
+
+  local child = CreateFrame("Frame", nil, scroll)
+  child:SetWidth(1); child:SetHeight(1)
+  scroll:SetScrollChild(child)
+
+  -- Pools (no wipe())
+  local fsPool, txPool = {}, {}
+  local active = {}
+
+  local measure = child:CreateFontString(nil, "ARTWORK", DEFAULT_FONT)
+  measure:Hide()
+
+  local function clearActive()
+    -- release active frames to pools (skip nils defensively)
+    for i = 1, (table.getn(active) or 0) do
+      local f = active[i]
+      if f then
+        f:Hide()
+        if f.GetObjectType and f:GetObjectType() == "FontString" then
+          table.insert(fsPool, f)
+        else
+          table.insert(txPool, f)
+        end
+        active[i] = nil
+      end
+    end
+    -- rebuild table to avoid holes (Lua 5.0/1.12 quirks)
+    active = {}
+  end
+
+  local function acquireFS()
+    local n = table.getn(fsPool) or 0
+    if n > 0 then
+      local fs = fsPool[n]
+      fsPool[n] = nil
+      if fs then fs:Show(); return fs end
+    end
+    local fs = child:CreateFontString(nil, "ARTWORK", DEFAULT_FONT)
+    fs:SetJustifyH("LEFT"); fs:SetJustifyV("TOP")
+    return fs
+  end
+
+  local function acquireTX()
+    local n = table.getn(txPool) or 0
+    if n > 0 then
+      local t = txPool[n]
+      txPool[n] = nil
+      if t then t:Show(); return t end
+    end
+    local t = child:CreateTexture(nil, "ARTWORK")
+    return t
+  end
+
+  local function baselineH(fontObject)
+    measure:SetFontObject(fontObject or DEFAULT_FONT)
+    measure:SetText("Ag")
+    local h = measure:GetHeight() or 16
+    if h <= 0 then h = 16 end
+    return h
+  end
+
+  local function splitWords(s, fontObject)
+    measure:SetFontObject(fontObject or DEFAULT_FONT)
+    local out = {}
+    local i, n = 1, string.len(s or "")
+    if n == 0 then return out end
+    while i <= n do
+      local a,b = string.find(s, "^[%s]+", i)
+      if a then
+        local chunk = string.sub(s, a, b)
+        measure:SetText(chunk)
+        table.insert(out, { text = chunk, w = measure:GetStringWidth() or 0 })
+        i = b + 1
+      else
+        local a2,b2 = string.find(s, "^[^%s]+", i)
+        local chunk = string.sub(s, a2 or i, b2 or i)
+        measure:SetText(chunk)
+        table.insert(out, { text = chunk, w = measure:GetStringWidth() or 0 })
+        i = (b2 or i) + 1
+      end
+    end
+    return out
+  end
+
+  local currentTokens = nil
+  local lastRawText = ""
+
+  local function renderTokens(tokens)
+    clearActive()
+
+    local viewW = root:GetWidth() or 0
+    local contentW = viewW - RIGHT_COL_W - INSET_L - INSET_R
+    if contentW < 1 then contentW = 1 end
+
+    local x = INSET_L
+    local y = -INSET_T
+    local lineH = 0
+
+    local function newLine()
+      x = INSET_L
+      y = y - (lineH > 0 and lineH or baselineH(DEFAULT_FONT))
+      lineH = 0
+    end
+
+    local count = tokens and table.getn(tokens) or 0
+    for i = 1, count do
+      local tk = tokens[i]
+      local kind = tk and tk.kind
+
+      if kind == "linebreak" then
+        newLine()
+
+      elseif kind == "icon" then
+        local w = tonumber(tk.w) or 16
+        local h = tonumber(tk.h) or 16
+        if x + w > INSET_L + contentW and x > INSET_L then
+          newLine()
+        end
+
+        local t = acquireTX()
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", child, "TOPLEFT", x, y)
+        t:SetWidth(w); t:SetHeight(h)
+        if tk.tex then t:SetTexture(tk.tex) end
+        if tk.tc and tk.tc[1] then t:SetTexCoord(tk.tc[1], tk.tc[2], tk.tc[3], tk.tc[4]) else t:SetTexCoord(0,1,0,1) end
+        t:SetVertexColor(1,1,1,1)
+        if t then table.insert(active, t) end
+
+        x = x + w
+        if h > lineH then lineH = h end
+
+      elseif kind == "text" then
+        local fontObj = tk.font or DEFAULT_FONT
+        local color = tk.color
+        local words = splitWords(tk.value or "", fontObj)
+
+        for j = 1, table.getn(words) do
+          local wr = words[j]
+          local w = math.ceil(wr.w or 0)
+          if w < 1 then
+            measure:SetFontObject(fontObj)
+            measure:SetText(wr.text or "")
+            w = math.ceil(measure:GetStringWidth() or 0); if w < 1 then w = 1 end
+          end
+
+          if x + w > INSET_L + contentW and x > INSET_L then
+            newLine()
+          end
+
+          local fs = acquireFS()
+          fs:SetFontObject(fontObj)
+          fs:ClearAllPoints()
+          fs:SetPoint("TOPLEFT", child, "TOPLEFT", x, y)
+          fs:SetText(wr.text or "")
+          if color and color[1] then
+            fs:SetTextColor(color[1] or 1, color[2] or 1, color[3] or 1)
+          else
+            fs:SetTextColor(1,1,1)
+          end
+          if fs then table.insert(active, fs) end
+
+          x = x + w
+          local lh = baselineH(fontObj)
+          if lh > lineH then lineH = lh end
+        end
+      end
+    end
+
+    if lineH == 0 then lineH = baselineH(DEFAULT_FONT) end
+    local totalH = (INSET_T + INSET_B) + (-y + lineH)
+    if totalH < 1 then totalH = 1 end
+    child:SetHeight(totalH)
+    child:SetWidth(viewW)
+    scroll:UpdateScrollChildRect()
+  end
+
+  local function SetTokens(tokens)
+    currentTokens = tokens
+    renderTokens(tokens)
+  end
+
+  local function SetText(s)
+    lastRawText = s or ""
+    SetTokens({ { kind="text", value=lastRawText, font=DEFAULT_FONT } })
+  end
+
+  local function GetText()
+    return lastRawText or ""
+  end
+
+  local function Refresh()
+    if currentTokens then
+      renderTokens(currentTokens)
+    else
+      renderTokens({ { kind="text", value=lastRawText or "", font=DEFAULT_FONT } })
+    end
+  end
+
+  -- 1.12 wheel uses arg1
+  scroll:EnableMouseWheel(true)
+  scroll:SetScript("OnMouseWheel", function()
+    local name = scroll:GetName() or ""
+    local sb = getglobal(name.."ScrollBar"); if not sb then return end
+    local delta = arg1 or 0
+    sb:SetValue((sb:GetValue() or 0) - delta * 20)
+  end)
+
+  root:SetScript("OnSizeChanged", Refresh)
+  root:SetScript("OnShow", Refresh)
+
+  return {
+    root      = root,
+    scroll    = scroll,
+    child     = child,
+    SetTokens = SetTokens,
+    SetText   = SetText,
+    GetText   = GetText,
+    Refresh   = Refresh,
+  }
+end
