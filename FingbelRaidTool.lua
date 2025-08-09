@@ -37,6 +37,17 @@ FRT.safePrint = (FRT and FRT.Print) or function(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. tostring(msg))
 end
 
+-- ===============================
+-- Helpers (1.12/Turtle WoW APIs)
+-- ===============================
+function FRT.IsLeaderOrOfficer()
+  if (GetNumRaidMembers() or 0) > 0 then
+    if IsRaidLeader and IsRaidLeader() then return true end
+    if IsRaidOfficer and IsRaidOfficer() then return true end
+  end
+  return false
+end
+
 -- =================
 -- Module system
 -- =================

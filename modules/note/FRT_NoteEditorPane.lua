@@ -3,17 +3,6 @@ FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
 -- ===============================
--- Helpers (1.12/Turtle WoW APIs)
--- ===============================
-local function IsLeaderOrOfficer()
-  if (GetNumRaidMembers() or 0) > 0 then
-    if IsRaidLeader and IsRaidLeader() then return true end
-    if IsRaidOfficer and IsRaidOfficer() then return true end
-  end
-  return false
-end
-
--- ===============================
 -- Main pane builder
 -- ===============================
 function Note.BuildNoteEditorPane(parent)
@@ -22,10 +11,17 @@ function Note.BuildNoteEditorPane(parent)
   title:SetPoint("TOPLEFT", 0, 0)
   title:SetText("Raid Note — Editor")
 
+  -- Layout constants
+  local SCROLLBAR_W = 20
+  local PADDING     = 4
+  local MIN_H       = 200
+
   -- Scroll area + background
   local scroll = CreateFrame("ScrollFrame", "FRT_NoteEditorScroll", parent, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 0, -24)
   scroll:SetPoint("BOTTOMRIGHT", -120, 36)
+  scroll:EnableMouse(false)        -- let clicks go to the edit box
+  scroll:EnableMouseWheel(true)
 
   local editBG = CreateFrame("Frame", nil, parent)
   editBG:SetPoint("TOPLEFT", 0, -24)
@@ -33,47 +29,84 @@ function Note.BuildNoteEditorPane(parent)
   editBG:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 12,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 }
+    tile     = true, tileSize = 16, edgeSize = 12,
+    insets   = { left = 3, right = 3, top = 3, bottom = 3 }
   })
   editBG:SetBackdropColor(0,0,0,0.5)
+  editBG:EnableMouse(false)
+  editBG:SetFrameLevel(parent:GetFrameLevel() - 1)
 
-  local edit = CreateFrame("EditBox", "FRT_NoteEditorEditBox", scroll)
+  -- Dedicated scroll child container
+  local child = CreateFrame("Frame", nil, scroll)
+  child:SetWidth((parent:GetWidth() - 140) - SCROLLBAR_W - PADDING*2)
+  child:SetHeight(MIN_H)
+  scroll:SetScrollChild(child)
+
+  -- Edit box inside the child, fill it
+  local edit = CreateFrame("EditBox", "FRT_NoteEditorEditBox", child)
   edit:SetMultiLine(true)
   edit:SetAutoFocus(false)
-  edit:SetWidth(parent:GetWidth() - 140)
-  edit:SetHeight(200)
   edit:SetFontObject("ChatFontNormal")
   edit:SetTextInsets(4,4,4,4)
+  edit:SetJustifyH("LEFT")
+  edit:SetJustifyV("TOP")
   edit:EnableMouse(true)
+  edit:SetAllPoints(child)  -- fill child to avoid click dead-zones
+
   edit:SetScript("OnEscapePressed", function() edit:ClearFocus() end)
   edit:SetScript("OnEnterPressed",  function() edit:Insert("\n") end)
-  edit:SetScript("OnTextChanged", function()
+  edit:SetScript("OnMouseDown",     function() edit:SetFocus() end)
+
+  -- Recompute sizes + scroll rect
+  local function Refresh()
+    -- width affects wrapping/height; update child width first
+    child:SetWidth((parent:GetWidth() - 140) - SCROLLBAR_W - PADDING*2)
+
+    -- estimate height from newline count (vanilla-friendly)
     local text = edit:GetText() or ""
-    local lines = 1
-    for _ in string.gfind(text, "\n") do lines = lines + 1 end
-    local h = lines * 16 + 12
-    if h < 200 then h = 200 end
-    edit:SetHeight(h)
+    local _, nl = string.gsub(text, "\n", "")
+    local h = (nl + 1) * 16 + 12
+    if h < MIN_H then h = MIN_H end
+
+    child:SetHeight(h)
+    scroll:UpdateScrollChildRect()
+  end
+
+  edit:SetScript("OnTextChanged", Refresh)
+
+  -- Auto-scroll caret into view (guard nils on 1.12)
+  edit:SetScript("OnCursorChanged", function(self, x, y, w, h)
+    if not y or not h then
+      scroll:UpdateScrollChildRect()
+      return
+    end
+    local cursorTop = -y
+    local viewTop   = scroll:GetVerticalScroll()
+    local viewH     = scroll:GetHeight()
+
+    if cursorTop + h > viewTop + viewH then
+      scroll:SetVerticalScroll(cursorTop + h - viewH)
+    elseif cursorTop < viewTop then
+      scroll:SetVerticalScroll(cursorTop)
+    end
   end)
 
-  scroll:SetScrollChild(edit)
-  scroll:EnableMouseWheel(true)
   scroll:SetScript("OnMouseWheel", function()
     local sb = getglobal(scroll:GetName() .. "ScrollBar")
     if not sb then return end
-    local step = 20
+    local step  = 20
     local delta = arg1 or 0
     sb:SetValue(sb:GetValue() - delta * step)
   end)
 
   -- Resize behavior inside host pane
   parent:SetScript("OnSizeChanged", function()
-    edit:SetWidth(parent:GetWidth() - 140)
+    Refresh()
   end)
+
   parent:SetScript("OnShow", function()
-    edit:SetWidth(parent:GetWidth() - 140)
     edit:SetText(tostring(FRT_Saved.note or ""))
+    Refresh()
   end)
 
   -- Buttons (right column)
@@ -82,7 +115,7 @@ function Note.BuildNoteEditorPane(parent)
   save:SetPoint("TOPRIGHT", 0, -24)
   save:SetText("Save")
   save:SetScript("OnClick", function()
-    if not IsLeaderOrOfficer() then
+    if not FRT.IsLeaderOrOfficer() then
       FRT.Print("Editor requires raid lead or assist.")
       return
     end
@@ -99,11 +132,9 @@ function Note.BuildNoteEditorPane(parent)
     local text = edit:GetText() or ""
     if text == "" then FRT.Print("Nothing to share."); return end
     if (GetNumRaidMembers() or 0) > 0 then
-      FRT.SendAddon("RAID", text)
-      FRT.Print("Shared to RAID.")
+      FRT.SendAddon("RAID", text);  FRT.Print("Shared to RAID.")
     elseif (GetNumPartyMembers() or 0) > 0 then
-      FRT.SendAddon("PARTY", text)
-      FRT.Print("Shared to PARTY.")
+      FRT.SendAddon("PARTY", text); FRT.Print("Shared to PARTY.")
     else
       FRT.Print("You are not in a group.")
     end
@@ -120,11 +151,10 @@ end
 
 -- Exposed helper so /frt editor routes to the global host
 function Note.ShowEditor(mod)
-  if not IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
+  if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
   if FRT and FRT.Editor and FRT.Editor.Show then
     FRT.Editor.Show("Note")
   else
     FRT.Print("Global editor not available.")
   end
 end
-

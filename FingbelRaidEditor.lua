@@ -53,10 +53,17 @@ function E:_CreateWindowOnce()
     insets = { left = 11, right = 12, top = 12, bottom = 11 }
   })
   f:EnableMouse(true)
-  f:SetMovable(true)
-  f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function() f:StartMoving() end)
-  f:SetScript("OnDragStop", function()
+  f:SetMovable(true)  -- keep movable, but don't register f itself for drag
+
+  -- title bar / drag handle
+  local drag = CreateFrame("Frame", nil, f)
+  drag:SetPoint("TOPLEFT", 12, -8)
+  drag:SetPoint("TOPRIGHT", -32, -8)
+  drag:SetHeight(22)
+  drag:EnableMouse(true)
+  drag:RegisterForDrag("LeftButton")
+  drag:SetScript("OnDragStart", function() f:StartMoving() end)
+  drag:SetScript("OnDragStop", function()
     f:StopMovingOrSizing()
     local x,y = f:GetLeft(), f:GetTop()
     if x and y then sv.x, sv.y = x,y end
