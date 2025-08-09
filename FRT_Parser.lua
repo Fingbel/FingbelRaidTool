@@ -70,7 +70,7 @@ do
 
     local i, n = 1, string.len(text)
     local curColor = nil
-    local curFont  = "GameFontHighlight" -- you can change this default if you want
+    local curFont  = "GameFontHighlight" --Could be set by tag
     local buf = ""
 
     local function flushBuf()

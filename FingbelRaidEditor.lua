@@ -1,14 +1,13 @@
--- Fingbel Raid Tool — Global Editor Host (1.12)
+-- Fingbel Raid Tool — Global Editor Host (1.12, bigger + resizable with handle)
 FRT = FRT or {}
 FRT.Editor = FRT.Editor or {}
 
 local E = FRT.Editor
-E._panels  = E._panels  or {}   -- name -> { builder=func, title=string, order=number }
-E._frames  = E._frames  or {}   -- name -> built frame
-E._buttons = E._buttons or {}   -- name -> button
-E._current = E._current or nil  -- current pane name
+E._panels  = E._panels  or {}
+E._frames  = E._frames  or {}
+E._buttons = E._buttons or {}
+E._current = E._current or nil
 
--- Public: modules call this to register their editor pane
 function E.RegisterPanel(name, builder, opts)
   if not name or not builder then return end
   E._panels[name] = {
@@ -24,7 +23,8 @@ end
 local function GetMainEditorSV()
   if type(FRT_Saved) ~= "table" then FRT_Saved = {} end
   FRT_Saved.ui = FRT_Saved.ui or {}
-  FRT_Saved.ui.mainEditor = FRT_Saved.ui.mainEditor or { x=nil, y=nil, w=560, h=360, selected=nil }
+  -- bigger defaults
+  FRT_Saved.ui.mainEditor = FRT_Saved.ui.mainEditor or { x=nil, y=nil, w=800, h=500, selected=nil }
   return FRT_Saved.ui.mainEditor
 end
 
@@ -37,7 +37,6 @@ local function SafePoint(frame, point, relTo, relPoint, x, y)
   end
 end
 
--- Create host window once
 function E:_CreateWindowOnce()
   if self.frame then return end
 
@@ -45,7 +44,7 @@ function E:_CreateWindowOnce()
 
   local f = CreateFrame("Frame", "FRT_MainEditor", UIParent)
   f:SetFrameStrata("DIALOG")
-  f:SetWidth(sv.w or 800); f:SetHeight(sv.h or 450)
+  f:SetWidth(sv.w or 800); f:SetHeight(sv.h or 500)
   f:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
@@ -71,11 +70,29 @@ function E:_CreateWindowOnce()
 
   f:SetClampedToScreen(true)
   if f.SetResizable then f:SetResizable(true) end
-  if f.SetMinResize then f:SetMinResize(520, 300) end
+  if f.SetMinResize then f:SetMinResize(800, 500) end -- tighter min for the bigger layout
+
+  -- visible resize handle (bottom-right)
+  local grip = CreateFrame("Button", nil, f)
+  grip:SetWidth(16); grip:SetHeight(16)
+  grip:SetPoint("BOTTOMRIGHT", 10, -10)
+  grip:SetFrameLevel(f:GetFrameLevel() + 10)
+  grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+  grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  grip:SetAlpha(0.6)
+  grip:SetScript("OnEnter", function() grip:SetAlpha(1) end)
+  grip:SetScript("OnLeave", function() grip:SetAlpha(0.6) end)
+  grip:SetScript("OnMouseDown", function()
+    if f.StartSizing then f:StartSizing("BOTTOMRIGHT") end
+  end)
+  grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
+
   f:SetScript("OnSizeChanged", function()
     local w,h = f:GetWidth(), f:GetHeight()
     if w and h then sv.w, sv.h = w,h end
     if self.left and self.content then
+      self.content:ClearAllPoints()
       self.content:SetPoint("TOPLEFT", self.left, "TOPRIGHT", 10, 0)
       self.content:SetPoint("BOTTOMRIGHT", -14, 14)
     end
@@ -93,10 +110,10 @@ function E:_CreateWindowOnce()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -5, -5)
 
-  -- left (tabs)
+  -- left (tabs) — a bit wider to suit more raid names
   local left = CreateFrame("Frame", nil, f)
   left:SetPoint("TOPLEFT", 14, -36)
-  left:SetWidth(140)
+  left:SetWidth(100)
   left:SetPoint("BOTTOMLEFT", 14, 14)
   left:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -113,7 +130,7 @@ function E:_CreateWindowOnce()
 
   self.frame, self.left, self.content = f, left, content
 
-  -- pass show/hide of the whole window to active pane
+  -- lifecycle passthrough
   f:SetScript("OnShow", function()
     if self._current and self._frames[self._current] then
       local pane = self._frames[self._current]
@@ -128,7 +145,7 @@ function E:_CreateWindowOnce()
     end
   end)
 
-  -- initial placement
+  -- placement
   if type(sv.x) == "number" and type(sv.y) == "number" then
     SafePoint(f, "TOPLEFT", UIParent, "BOTTOMLEFT", sv.x, sv.y)
   else
@@ -139,7 +156,6 @@ function E:_CreateWindowOnce()
   self:_RebuildButtons()
 end
 
--- Build/refresh left-side tab buttons
 function E:_RebuildButtons()
   for _, btn in pairs(self._buttons) do btn:Hide() end
   self._buttons = {}
@@ -156,7 +172,7 @@ function E:_RebuildButtons()
   for _, name in ipairs(names) do
     local info = self._panels[name]
     local btn = CreateFrame("Button", nil, self.left, "UIPanelButtonTemplate")
-    btn:SetWidth(120); btn:SetHeight(20)
+    btn:SetWidth(80); btn:SetHeight(20) -- slightly wider for the wider left pane
     btn:SetPoint("TOPLEFT", 10, y)
     btn:SetText(info.title or name)
     btn:SetScript("OnClick", function() E:_Select(name) end)
@@ -165,7 +181,6 @@ function E:_RebuildButtons()
   end
 end
 
--- Build a panel frame on demand
 function E:_EnsurePanel(name)
   if self._frames[name] then return self._frames[name] end
   local info = self._panels[name]; if not info then return nil end
@@ -177,26 +192,22 @@ function E:_EnsurePanel(name)
   return pane
 end
 
--- Internal: select tab + show panel (with lifecycle calls)
 function E:_Select(name)
   if not name then return end
   local sv = GetMainEditorSV()
   sv.selected = name
 
-  -- hide previous pane + notify
   if self._current and self._frames[self._current] then
     local oldPane = self._frames[self._current]
     if oldPane.OnHostHidden then oldPane:OnHostHidden(self.frame) end
     oldPane:Hide()
   end
 
-  -- button visuals
   for n,btn in pairs(self._buttons) do
     if btn.SetButtonState then btn:SetButtonState((n == name) and "PUSHED" or "NORMAL") end
     if btn.SetEnabled then btn:SetEnabled(n ~= name) end
   end
 
-  -- show new pane + notify
   local pane = self:_EnsurePanel(name)
   if pane then
     self._current = name
@@ -206,7 +217,6 @@ function E:_Select(name)
   end
 end
 
--- Show main editor (optionally focus a tab)
 function E.Show(name)
   E:_CreateWindowOnce()
   E.frame:Show()
@@ -219,10 +229,5 @@ function E.Show(name)
   end
 end
 
-function E.Hide()
-  if E.frame then E.frame:Hide() end
-end
-
-function E.Toggle(name)
-  if E.frame and E.frame:IsShown() then E.Hide() else E.Show(name) end
-end
+function E.Hide() if E.frame then E.frame:Hide() end end
+function E.Toggle(name) if E.frame and E.frame:IsShown() then E.Hide() else E.Show(name) end end
