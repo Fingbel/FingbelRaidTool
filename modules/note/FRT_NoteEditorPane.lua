@@ -13,8 +13,6 @@ function Note.BuildNoteEditorPane(parent)
   editorArea:SetPoint("TOPLEFT", 0, -24)
   editorArea:SetPoint("BOTTOMRIGHT", -120, 36)
 
-  
-
   -- Build the scrollable editor via util (give it a name to be safe)
   local ed = FRT.Utils.CreateScrollableEdit(editorArea, {
     name             = "FRT_NoteEditorScroll", -- important for template!

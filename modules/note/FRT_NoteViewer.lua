@@ -2,11 +2,9 @@ FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
-local viewer, vtext, vresize, vlock
+local viewer, vresize, vlock
+local ed -- the util return (contains .scroll, .edit, .SetText, etc.)
 
--- ===============================
--- Helpers 
--- ===============================
 function Note.UpdateViewerLockUI()
   if FRT_Saved.ui.viewer.locked then
     if vresize then vresize:Hide() end
@@ -19,14 +17,10 @@ function Note.UpdateViewerLockUI()
 end
 
 function Note.UpdateViewerText(mod)
-  local w = (viewer and viewer:GetWidth() or 320) - 36
-  if w < 50 then w = 50 end
-  if vtext and vtext.SetWidth then vtext:SetWidth(w) end
-  if vtext then
-    vtext:SetJustifyH("LEFT")
-    vtext:SetJustifyV("TOP")
-    vtext:SetText(tostring(FRT_Saved.note or ""))
-  end
+  if not ed then return end
+  ed.SetText(tostring(FRT_Saved.note or ""))
+  -- util handles recomputing height + scrollbar range
+  if ed.Refresh then ed.Refresh() end
 end
 
 function Note.ShowViewer(mod)
@@ -34,8 +28,7 @@ function Note.ShowViewer(mod)
   viewer:Show()
   local sv = FRT_Saved.ui.viewer
   if type(sv.w) == "number" and type(sv.h) == "number" then
-    viewer:SetWidth(sv.w)
-    viewer:SetHeight(sv.h)
+    viewer:SetWidth(sv.w); viewer:SetHeight(sv.h)
   end
   if type(sv.x) == "number" and type(sv.y) == "number" then
     FRT.SafeSetPoint(viewer, "TOPLEFT", UIParent, "BOTTOMLEFT", sv.x, sv.y)
@@ -46,9 +39,6 @@ function Note.ShowViewer(mod)
   Note.UpdateViewerText(Note)
 end
 
--- ===============================
--- Main viewer builder
--- ===============================
 function Note.BuildViewer()
   viewer = CreateFrame("Frame", "FRT_Viewer", UIParent)
   viewer:SetWidth(320); viewer:SetHeight(160)
@@ -71,45 +61,31 @@ function Note.BuildViewer()
     if x and y then FRT_Saved.ui.viewer.x = x; FRT_Saved.ui.viewer.y = y end
   end)
   viewer:SetClampedToScreen(true)
-
   if viewer.SetResizable then viewer:SetResizable(true) end
   if viewer.SetMinResize then viewer:SetMinResize(240, 120) end
 
-  viewer:SetScript("OnSizeChanged", function()
-    local w = viewer:GetWidth(); local h = viewer:GetHeight()
-    if w and h then FRT_Saved.ui.viewer.w = w; FRT_Saved.ui.viewer.h = h end
-    Note.UpdateViewerText(Note)
-  end)
-
-  vresize = CreateFrame("Button", nil, viewer)
-  vresize:SetWidth(16); vresize:SetHeight(16)
-  vresize:SetPoint("BOTTOMRIGHT", 10, -10)
-  vresize:SetFrameLevel(viewer:GetFrameLevel() + 10)
-  vresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  vresize:GetNormalTexture():SetVertexColor(1,1,1,0.9)
-  vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-  vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-  vresize:SetAlpha(0.4)
-  vresize:SetScript("OnEnter", function() vresize:SetAlpha(1) end)
-  vresize:SetScript("OnLeave", function() vresize:SetAlpha(0.4) end)
-  vresize:SetScript("OnMouseDown", function()
-    if not FRT_Saved.ui.viewer.locked then viewer:StartSizing("BOTTOMRIGHT") end
-  end)
-  vresize:SetScript("OnMouseUp", function() viewer:StopMovingOrSizing() end)
-
-  viewer:Hide()
-
+  -- Title
   local vt = viewer:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   vt:SetPoint("TOP", 0, -10)
   vt:SetText("FRT — Raid Note")
 
-  vtext = viewer:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  vtext:SetPoint("TOPLEFT", 18, -36)
-  vtext:SetWidth((viewer:GetWidth() or 320) - 36)
-  vtext:SetJustifyH("LEFT")
-  vtext:SetJustifyV("TOP")
-  vtext:SetNonSpaceWrap(true)
-  vtext:SetText("")
+  -- Read-only scrollable area using the util
+  local area = CreateFrame("Frame", nil, viewer)
+  area:SetPoint("TOPLEFT", 18, -36)
+  area:SetPoint("BOTTOMRIGHT", -18, 18)
+
+  ed = FRT.Utils.CreateScrollableEdit(area, {
+    name             = "FRT_ViewerScroll", -- template needs a name
+    rightColumnWidth = 20,
+    scrollbarWidth   = 20,
+    padding          = 0,
+    minHeight        = 50,
+    insets           = { left=0, right=0, top=0, bottom=0 },
+    topPadOverlay    = 2,                 -- tiny visual gap at top
+    fontObject       = "GameFontHighlight",
+    backdrop         = nil,               -- viewer already has a dialog backdrop
+    readonly         = true,              -- << key: no caret / no typing
+  })
 
   -- lock toggle
   vlock = CreateFrame("CheckButton", "FRT_ViewerLock", viewer, "UICheckButtonTemplate")
@@ -127,8 +103,34 @@ function Note.BuildViewer()
     FRT.Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
   end)
 
+  -- resize handle
+  vresize = CreateFrame("Button", nil, viewer)
+  vresize:SetWidth(16); vresize:SetHeight(16)
+  vresize:SetPoint("BOTTOMRIGHT", 10, -10)
+  vresize:SetFrameLevel(viewer:GetFrameLevel() + 10)
+  vresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+  vresize:GetNormalTexture():SetVertexColor(1,1,1,0.9)
+  vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  vresize:SetAlpha(0.4)
+  vresize:SetScript("OnEnter", function() vresize:SetAlpha(1) end)
+  vresize:SetScript("OnLeave", function() vresize:SetAlpha(0.4) end)
+  vresize:SetScript("OnMouseDown", function()
+    if not FRT_Saved.ui.viewer.locked then viewer:StartSizing("BOTTOMRIGHT") end
+  end)
+  vresize:SetScript("OnMouseUp", function() viewer:StopMovingOrSizing() end)
+
+  -- close button
   local vclose = CreateFrame("Button", nil, viewer, "UIPanelCloseButton")
   vclose:SetPoint("TOPRIGHT", -5, -5)
 
+  -- Persist size + refresh
+  viewer:SetScript("OnSizeChanged", function()
+    local w, h = viewer:GetWidth(), viewer:GetHeight()
+    if w and h then FRT_Saved.ui.viewer.w, FRT_Saved.ui.viewer.h = w, h end
+    if ed and ed.Refresh then ed.Refresh() end
+  end)
+
+  viewer:Hide()
   Note.UpdateViewerLockUI()
 end
