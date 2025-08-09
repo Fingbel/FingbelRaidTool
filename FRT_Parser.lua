@@ -25,6 +25,23 @@ do
 
   local function pushText(tokens, text, color, font)
     if not text or text == "" then return end
+
+    -- Merge with previous text token if same style
+    local n = table.getn(tokens)
+    if n > 0 then
+      local prev = tokens[n]
+      if prev and prev.kind == "text" then
+        local sameFont  = (prev.font  == (font  or prev.font))
+        local pc, nc    = prev.color, color
+        local sameColor = ( (not pc and not nc)
+                        or (pc and nc and pc[1]==nc[1] and pc[2]==nc[2] and pc[3]==nc[3]) )
+        if sameFont and sameColor then
+          prev.value = (prev.value or "") .. text
+          return
+        end
+      end
+    end
+
     table.insert(tokens, { kind="text", value=text, color=color, font=font })
   end
   local function pushIcon(tokens, idx, w, h)
