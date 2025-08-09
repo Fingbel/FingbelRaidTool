@@ -13,3 +13,5 @@ modules\FRT_Utils.lua
 modules\note\FRT_NoteCore.lua
 modules\note\FRT_NoteEditorPane.lua
 modules\note\FRT_NoteViewer.lua
+
+FRT_TestInlineRich.lua
