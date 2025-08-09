@@ -15,17 +15,19 @@ function Note.BuildNoteEditorPane(parent)
   local SCROLLBAR_W = 20
   local PADDING     = 4
   local MIN_H       = 200
+  local RIGHT_COL_W = 120
+  local INSET_L, INSET_R = 4, 4  -- must match edit:SetTextInsets
 
   -- Scroll area + background
   local scroll = CreateFrame("ScrollFrame", "FRT_NoteEditorScroll", parent, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 0, -24)
-  scroll:SetPoint("BOTTOMRIGHT", -120, 36)
+  scroll:SetPoint("BOTTOMRIGHT", -RIGHT_COL_W, 36)
   scroll:EnableMouse(false)        -- let clicks go to the edit box
   scroll:EnableMouseWheel(true)
 
   local editBG = CreateFrame("Frame", nil, parent)
   editBG:SetPoint("TOPLEFT", 0, -24)
-  editBG:SetPoint("BOTTOMRIGHT", -120, 36)
+  editBG:SetPoint("BOTTOMRIGHT", -RIGHT_COL_W, 36)
   editBG:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -38,7 +40,7 @@ function Note.BuildNoteEditorPane(parent)
 
   -- Dedicated scroll child container
   local child = CreateFrame("Frame", nil, scroll)
-  child:SetWidth((parent:GetWidth() - 140) - SCROLLBAR_W - PADDING*2)
+  child:SetWidth((parent:GetWidth() - RIGHT_COL_W) - SCROLLBAR_W - PADDING*2)
   child:SetHeight(MIN_H)
   scroll:SetScrollChild(child)
 
@@ -47,7 +49,7 @@ function Note.BuildNoteEditorPane(parent)
   edit:SetMultiLine(true)
   edit:SetAutoFocus(false)
   edit:SetFontObject("ChatFontNormal")
-  edit:SetTextInsets(4,4,4,4)
+  edit:SetTextInsets(INSET_L, INSET_R, 4, 4)
   edit:SetJustifyH("LEFT")
   edit:SetJustifyV("TOP")
   edit:EnableMouse(true)
@@ -57,18 +59,98 @@ function Note.BuildNoteEditorPane(parent)
   edit:SetScript("OnEnterPressed",  function() edit:Insert("\n") end)
   edit:SetScript("OnMouseDown",     function() edit:SetFocus() end)
 
+  -- 1.12 compat: ScrollFrame:UpdateScrollChildRect() doesn't exist -> shim it
+  if not scroll.UpdateScrollChildRect then
+    function scroll:UpdateScrollChildRect()
+      local c = self:GetScrollChild(); if not c then return end
+      local contentH = c:GetHeight() or 0
+      local viewH    = self:GetHeight() or 0
+      local max      = contentH - viewH
+      if max < 0 then max = 0 end
+      local sb = getglobal(self:GetName() .. "ScrollBar")
+      if sb then
+        local cur = sb:GetValue() or 0
+        sb:SetMinMaxValues(0, max)
+        if cur > max then cur = max end
+        sb:SetValue(cur)
+      end
+    end
+  end
+
+  -- Hidden measurer (for wrapped height; 1.12-safe)
+  local measure = child:CreateFontString(nil, "ARTWORK", "ChatFontNormal")
+  measure:Hide()
+  measure:SetNonSpaceWrap(false) -- we'll compute wraps by width, not rely on FS wrapping
+  measure:SetJustifyH("LEFT"); measure:SetJustifyV("TOP")
+
+  local function innerWidth()
+    local w = (parent:GetWidth() - RIGHT_COL_W) - SCROLLBAR_W - PADDING*2
+    if w < 1 then w = 1 end
+    return w
+  end
+
+  local function lineHeight()
+    measure:SetWidth(1000) -- ensure no wrap
+    measure:SetText("Ag")
+    local h = tonumber(measure:GetHeight()) or 16
+    if h <= 0 then h = 16 end
+    return h
+  end
+
+  local function stringPixelWidth(s)
+    measure:SetText(s or "")
+    return tonumber(measure:GetStringWidth()) or 0
+  end
+
+  -- Compute true content height (counts soft-wrapped rows)
+  local function ComputeWrappedHeight()
+    local innerW = innerWidth() - (INSET_L + INSET_R)
+    if innerW < 1 then innerW = 1 end
+
+    -- fallback average glyph width for super-long no-metric strings
+    measure:SetText("W")
+    local avgW = tonumber(measure:GetStringWidth()) or 8
+    if avgW <= 0 then avgW = 8 end
+
+    local lh   = lineHeight()
+    local text = edit:GetText() or ""
+    local rows = 0
+    local pos  = 1
+
+    while true do
+      local s, e = string.find(text, "\n", pos, true)
+      local line
+      if s then line = string.sub(text, pos, s - 1); pos = e + 1
+      else      line = string.sub(text, pos);         pos = nil end
+
+      if line == "" or line == nil then
+        rows = rows + 1
+      else
+        local px = stringPixelWidth(line)
+        if px == 0 then px = string.len(line) * avgW end
+        local r = math.ceil(px / innerW); if r < 1 then r = 1 end
+        rows = rows + r
+      end
+
+      if not pos then break end
+    end
+
+    if rows < 1 then rows = 1 end
+    local h = rows * lh + 12
+    if h < MIN_H then h = MIN_H end
+    return h
+  end
+
   -- Recompute sizes + scroll rect
   local function Refresh()
     -- width affects wrapping/height; update child width first
-    child:SetWidth((parent:GetWidth() - 140) - SCROLLBAR_W - PADDING*2)
+    child:SetWidth(innerWidth())
 
-    -- estimate height from newline count (vanilla-friendly)
-    local text = edit:GetText() or ""
-    local _, nl = string.gsub(text, "\n", "")
-    local h = (nl + 1) * 16 + 12
-    if h < MIN_H then h = MIN_H end
-
+    -- measure real wrapped height
+    local h = ComputeWrappedHeight()
     child:SetHeight(h)
+
+    -- tell scrollbar its range
     scroll:UpdateScrollChildRect()
   end
 
@@ -81,8 +163,8 @@ function Note.BuildNoteEditorPane(parent)
       return
     end
     local cursorTop = -y
-    local viewTop   = scroll:GetVerticalScroll()
-    local viewH     = scroll:GetHeight()
+    local viewTop   = scroll:GetVerticalScroll() or 0
+    local viewH     = scroll:GetHeight() or 0
 
     if cursorTop + h > viewTop + viewH then
       scroll:SetVerticalScroll(cursorTop + h - viewH)
