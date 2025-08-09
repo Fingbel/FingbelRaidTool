@@ -14,8 +14,6 @@ FRT.Utils = FRT.Utils or {}
 function FRT.Utils.CreateScrollableEdit(parent, opts)
   opts = opts or {}
   local RIGHT_COL_W   = opts.rightColumnWidth or 0
-  local SCROLLBAR_W   = opts.scrollbarWidth  or 20
-  local PADDING       = opts.padding         or 4
   local MIN_H         = opts.minHeight       or 200
   local INSET_L       = (opts.insets and opts.insets.left)   or 4
   local INSET_R       = (opts.insets and opts.insets.right)  or 4
