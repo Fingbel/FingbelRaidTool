@@ -8,4 +8,6 @@
 FingbelRaidTool.lua
 FingbelRaidEditor.lua
 
-modules\note\FRT_Note.lua
+modules\note\FRT_NoteCore.lua
+modules\note\FRT_NoteEditorPane.lua
+modules\note\FRT_NoteViewer.lua

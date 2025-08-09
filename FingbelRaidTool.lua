@@ -33,6 +33,10 @@ function FRT.SendAddon(channel, text)
     SendAddonMessage(FRT.ADDON_PREFIX, text, channel)
 end
 
+FRT.safePrint = (FRT and FRT.Print) or function(msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. tostring(msg))
+end
+
 -- =================
 -- Module system
 -- =================
