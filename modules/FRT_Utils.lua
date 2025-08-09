@@ -61,7 +61,7 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   -- Scroll child frame
   local child = CreateFrame("Frame", nil, scroll)
   local function innerWidth()
-    local w = (root:GetWidth() or 0) - RIGHT_COL_W - SCROLLBAR_W - PADDING*2
+    local w = (root:GetWidth() or 0) + 4 --manual adjusting
     if w < 1 then w = 1 end
     return w
   end

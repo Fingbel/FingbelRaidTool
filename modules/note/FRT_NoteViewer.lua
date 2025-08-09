@@ -76,8 +76,7 @@ function Note.BuildViewer()
 
   ed = FRT.Utils.CreateScrollableEdit(area, {
     name             = "FRT_ViewerScroll", -- template needs a name
-    rightColumnWidth = 20,
-    scrollbarWidth   = 20,
+    rightColumnWidth = 18, -- to be correctly on the background
     padding          = 0,
     minHeight        = 50,
     insets           = { left=0, right=0, top=0, bottom=0 },
