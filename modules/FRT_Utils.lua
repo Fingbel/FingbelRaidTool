@@ -18,7 +18,6 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   local INSET_R       = (opts.insets and opts.insets.right)  or 4
   local INSET_T       = (opts.insets and opts.insets.top)    or 4
   local INSET_B       = (opts.insets and opts.insets.bottom) or 4
-  local TOP_PAD       = opts.topPadOverlay or 0
   local FONT_OBJECT   = opts.fontObject or "ChatFontNormal"
 
   -- Root container
@@ -35,20 +34,6 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   scroll:SetPoint("BOTTOMRIGHT", -RIGHT_COL_W, 0)
   scroll:EnableMouse(false)
   scroll:EnableMouseWheel(true)
-
-  -- Optional top padding overlay for visual gap when scrolled
-  if TOP_PAD and TOP_PAD > 0 then
-    local topPad = CreateFrame("Frame", nil, root)
-    topPad:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-    topPad:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
-    topPad:SetHeight(TOP_PAD)
-    topPad:SetFrameLevel((scroll:GetFrameLevel() or 0) + 5)
-    topPad:EnableMouse(false)
-    local tex = topPad:CreateTexture(nil, "OVERLAY")
-    tex:SetAllPoints(true)
-    tex:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
-    tex:SetVertexColor(0, 0, 0, 0.5)
-  end
 
   -- Scroll child
   local child = CreateFrame("Frame", nil, scroll)

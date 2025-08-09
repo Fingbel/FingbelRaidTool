@@ -21,7 +21,6 @@ function Note.BuildNoteEditorPane(parent)
     padding          = 4,
     minHeight        = 200,
     insets           = { left=4, right=4, top=4, bottom=4 },
-    topPadOverlay    = 6,
     fontObject       = "ChatFontNormal",
   })
 
