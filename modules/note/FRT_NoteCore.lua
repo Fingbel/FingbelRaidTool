@@ -121,7 +121,7 @@ function Note.OnSlash(mod, cmd, rest)
     else
       FRT_Saved.ui.viewer.locked = not FRT_Saved.ui.viewer.locked
     end
-    UpdateViewerLockUI()
+    Note.UpdateViewerLockUI()
     FRT.Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
     return true
   end
