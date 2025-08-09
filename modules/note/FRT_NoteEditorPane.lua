@@ -119,20 +119,30 @@ end
   end)
 
   local share = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-  share:SetWidth(96); share:SetHeight(22)
-  share:SetPoint("TOPRIGHT", 0, -50)
-  share:SetText("Share")
-  share:SetScript("OnClick", function()
-    local text = ed.GetText()
-    if text == "" then FRT.Print("Nothing to share."); return end
-    if (GetNumRaidMembers() or 0) > 0 then
-      FRT.SendAddon("RAID", text);  FRT.Print("Shared to RAID.")
-    elseif (GetNumPartyMembers() or 0) > 0 then
-      FRT.SendAddon("PARTY", text); FRT.Print("Shared to PARTY.")
-    else
-      FRT.Print("You are not in a group.")
-    end
-  end)
+    share:SetWidth(96); share:SetHeight(22)
+    share:SetPoint("TOPRIGHT", 0, -50)
+    share:SetText("Share")
+    share:SetScript("OnClick", function()
+      local text = ed.GetText()
+      if text == "" then FRT.Print("Nothing to share."); return end
+      if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then
+        FRT.Print("Sharing unavailable (NoteNet not loaded).")
+        return
+      end
+
+      if (GetNumRaidMembers() or 0) > 0 then
+        FRT.NoteNet.Send(text, "RAID")
+        FRT.Print("Shared to RAID.")
+      elseif (GetNumPartyMembers() or 0) > 0 then
+        FRT.NoteNet.Send(text, "PARTY")
+        FRT.Print("Shared to PARTY.")
+      elseif IsInGuild and IsInGuild() then
+        FRT.NoteNet.Send(text, "GUILD")
+        FRT.Print("Shared to GUILD.")
+      else
+        FRT.Print("You are not in a group.")
+      end
+    end)
 
   local openViewer = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
   openViewer:SetWidth(96); openViewer:SetHeight(22)

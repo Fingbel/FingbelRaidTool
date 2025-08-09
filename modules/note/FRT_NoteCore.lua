@@ -1,9 +1,9 @@
--- Fingbel Raid Tool - Note Module (embedded editor pane)
+-- Fingbel Raid Tool - Note Module (1.12-safe binder)
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 Note.name = "Note"
 
-FRT.safePrint("FRT_Note.lua loaded")
+FRT.safePrint("FRT_NoteCore.lua loaded (NoteNet)")
 
 -- ===============================
 -- SavedVariables (module scope)
@@ -16,32 +16,40 @@ local function EnsureSaved()
   if FRT_Saved.ui.viewer.locked   == nil then FRT_Saved.ui.viewer.locked   = false end
 end
 
+local function WireNoteNetCallback()
+  if FRT and FRT.NoteNet and not Note.__wiredNoteNet then
+    FRT.NoteNet.onNoteReceived = function(sender, text, meta)
+      FRT_Saved.note = tostring(text or "")
+      Note.UpdateViewerText(Note)
+      if FRT_Saved.ui.viewer.autoOpen then Note.ShowViewer(Note) end
+      FRT.Print("Note received from " .. (sender or "?"))
+    end
+    Note.__wiredNoteNet = true
+    FRT.safePrint("NoteNet callback wired.")
+  end
+end
+
 -- ===============================
 -- Module events (comms)
 -- ===============================
-local ev = CreateFrame("Frame")
-
 function Note.OnLoad(mod)
   EnsureSaved()
-  FRT.RegisterAddonPrefix()
+  FRT.RegisterAddonPrefix()      -- ensure prefix registered
   Note.BuildViewer()
 
-  -- Register our editor pane with the global editor host (if present)
   if FRT and FRT.Editor and FRT.Editor.RegisterPanel then
     FRT.Editor.RegisterPanel("Note", Note.BuildNoteEditorPane, { title = "📝 Raid Note", order = 10 })
   end
 
-  -- Listen for incoming addon notes
-  ev:RegisterEvent("CHAT_MSG_ADDON")
-  ev:SetScript("OnEvent", function()
-    if event == "CHAT_MSG_ADDON" then
-      local prefix, message, channel, sender = arg1, arg2, arg3, arg4
-      if prefix == FRT.ADDON_PREFIX and sender ~= UnitName("player") then
-        FRT_Saved.note = tostring(message or "")
-        --FRT.Print("Note from " .. (sender or "unknown") .. ": " .. FRT_Saved.note)
-        Note.UpdateViewerText(Note)
-        if FRT_Saved.ui.viewer.autoOpen then Note.ShowViewer(Note) end
-      end
+  WireNoteNetCallback()
+
+  -- late-bind on next frame 
+  local retry = CreateFrame("Frame")
+  retry:SetScript("OnUpdate", function()
+    if Note.__wiredNoteNet then
+      retry:SetScript("OnUpdate", nil)
+    else
+      WireNoteNetCallback()
     end
   end)
 end
@@ -51,15 +59,67 @@ end
 -- ===============================
 function Note.GetHelp(mod)
   return {
-    "/frt set <text>        - set note",
-    "/frt show              - show note in chat",
-    "/frt share             - send note to raid/party",
-    "/frt clear             - clear the note",
-    "/frt view              - open read-only viewer",
-    "/frt editor            - open global editor on Note (lead/assist)",
-    "/frt autoopen on|off   - toggle auto-open viewer",
-    "/frt lock [on|off]     - lock/unlock viewer move/resize",
+    "/frt set <text>                  - set note",
+    "/frt show                        - show note in chat",
+    "/frt share [raid|party|guild|bg] - share note (auto if omitted)",
+    "/frt share whisper <name>        - whisper note (if supported)",
+    "/frt clear                       - clear the note",
+    "/frt view                        - open read-only viewer",
+    "/frt editor                      - open global editor on Note (lead/assist)",
+    "/frt autoopen on|off             - toggle auto-open viewer",
+    "/frt lock [on|off]               - lock/unlock viewer move/resize",
   }
+end
+
+local function AutoShareChannel()
+  if (GetNumRaidMembers() or 0) > 0 then
+    if (GetBattlefieldStatus and GetBattlefieldStatus(1) == "active") or (UnitInBattleground and UnitInBattleground("player")) then
+      return "BATTLEGROUND"
+    end
+    return "RAID"
+  elseif (GetNumPartyMembers() or 0) > 0 then
+    return "PARTY"
+  elseif IsInGuild and IsInGuild() then
+    return "GUILD"
+  end
+  return nil
+end
+
+local function DoShare(rest)
+  if not FRT.NoteNet then
+    FRT.Print("Sharing unavailable (NoteNet not loaded).")
+    return true
+  end
+  local txt = FRT_Saved.note or ""
+  if txt == "" then FRT.Print("Note is empty."); return true end
+
+  local a = string.lower(tostring(rest or ""))
+
+  if a == "raid" then
+    FRT.NoteNet.Send(txt, "RAID"); FRT.Print("Note shared to RAID."); return true
+  elseif a == "party" then
+    FRT.NoteNet.Send(txt, "PARTY"); FRT.Print("Note shared to PARTY."); return true
+  elseif a == "guild" or a == "g" then
+    FRT.NoteNet.Send(txt, "GUILD"); FRT.Print("Note shared to GUILD."); return true
+  elseif a == "bg" or a == "battleground" then
+    FRT.NoteNet.Send(txt, "BATTLEGROUND"); FRT.Print("Note shared to BATTLEGROUND."); return true
+  end
+
+  local wcmd, wtarget = string.match(rest or "", "^(%S+)%s+(.+)$")
+  if wcmd and string.lower(wcmd) == "whisper" and wtarget and wtarget ~= "" then
+    FRT.NoteNet.Send(txt, "WHISPER", wtarget)
+    FRT.Print("Note whispered to " .. wtarget .. ".")
+    return true
+  end
+
+  local ch = AutoShareChannel()
+  if ch then
+    FRT.NoteNet.Send(txt, ch)
+    FRT.Print("Note shared to " .. ch .. ".")
+  else
+    FRT.Print("You are not in a group/guild.")
+  end
+  return true
 end
 
 function Note.OnSlash(mod, cmd, rest)
@@ -68,50 +128,30 @@ function Note.OnSlash(mod, cmd, rest)
     FRT.Print("Set note: " .. FRT_Saved.note)
     Note.UpdateViewerText(Note)
     return true
-
   elseif cmd == "show" then
     FRT.Print("Current note: " .. (FRT_Saved.note or "<nil>"))
     return true
-
   elseif cmd == "share" then
-    if GetNumRaidMembers() > 0 then
-      FRT.SendAddon("RAID", FRT_Saved.note)
-      FRT.Print("Note shared to RAID.")
-    elseif GetNumPartyMembers() > 0 then
-      FRT.SendAddon("PARTY", FRT_Saved.note)
-      FRT.Print("Note shared to PARTY.")
-    else
-      FRT.Print("You are not in a group.")
-    end
-    return true
-
+    return DoShare(rest)
   elseif cmd == "clear" then
     FRT_Saved.note = ""
     FRT.Print("Note cleared.")
     Note.UpdateViewerText(Note)
     return true
-
   elseif cmd == "view" then
-    Note.ShowViewer(Note)
-    return true
-
+    Note.ShowViewer(Note); return true
   elseif cmd == "editor" then
-    Note.ShowEditor(Note)
-    return true
-
+    Note.ShowEditor(Note); return true
   elseif cmd == "autoopen" then
     local a = string.lower(rest or "")
     if a == "on" or a == "1" or a == "true" then
-      FRT_Saved.ui.viewer.autoOpen = true
-      FRT.Print("Auto-open ON.")
+      FRT_Saved.ui.viewer.autoOpen = true; FRT.Print("Auto-open ON.")
     elseif a == "off" or a == "0" or a == "false" then
-      FRT_Saved.ui.viewer.autoOpen = false
-      FRT.Print("Auto-open OFF.")
+      FRT_Saved.ui.viewer.autoOpen = false; FRT.Print("Auto-open OFF.")
     else
       FRT.Print("Auto-open is " .. (FRT_Saved.ui.viewer.autoOpen and "ON" or "OFF") .. ". Use /frt autoopen on|off")
     end
     return true
-
   elseif cmd == "lock" then
     local a = string.lower(rest or "")
     if a == "on" or a == "1" or a == "true" then
@@ -125,15 +165,13 @@ function Note.OnSlash(mod, cmd, rest)
     FRT.Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
     return true
   end
-
-  return false -- not handled
+  return false
 end
 
 -- Register module with core (immediately on file load)
 if FRT and FRT.RegisterModule then
   FRT.RegisterModule(Note.name, Note)
 else
-  -- Extreme fallback: if core isn't loaded yet, create a tiny loader
   local wait = CreateFrame("Frame")
   wait:SetScript("OnUpdate", function()
     if FRT and FRT.RegisterModule then
