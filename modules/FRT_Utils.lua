@@ -19,6 +19,8 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   local INSET_T       = (opts.insets and opts.insets.top)    or 4
   local INSET_B       = (opts.insets and opts.insets.bottom) or 4
   local FONT_OBJECT   = opts.fontObject or "ChatFontNormal"
+  local BACKGROUND = opts.background or "Interface\\ChatFrame\\ChatFrameBackground"
+  local BORDER = opts.border or "Interface\\Tooltips\\UI-Tooltip-Border"
 
   -- Root container
   local root = CreateFrame("Frame", nil, parent)
@@ -27,6 +29,21 @@ function FRT.Utils.CreateScrollableEdit(parent, opts)
   -- Generate a unique name for the scrollframe (template requires a name)
   FRT.Utils.__scroll_id = (FRT.Utils.__scroll_id or 0) + 1
   local sfName = opts.name or ("FRT_ScrollEdit"..FRT.Utils.__scroll_id)
+
+  -- BACKDROP/BORDER under the scrollframe (restores Blizzard-looking line)
+  local box = CreateFrame("Frame", nil, parent)
+  box:SetPoint("TOPLEFT", root, "TOPLEFT", 0, 0)
+  box:SetPoint("BOTTOMRIGHT", root, "BOTTOMRIGHT", 0, 0)
+  box:SetBackdrop({
+    bgFile   = BACKGROUND,
+    edgeFile = BORDER,
+    tile     = true, tileSize = 16, edgeSize = 12,
+    insets   = { left = 3, right = 3, top = 3, bottom = 3 }
+  })
+  box:SetBackdropColor(0, 0, 0, 0.5)
+  box:EnableMouse(false)
+  -- make sure the border sits *behind* the scroll content
+  box:SetFrameLevel((root:GetFrameLevel() or 0) - 1)
 
   -- Scroll frame (with Blizzard scrollbar)
   local scroll = CreateFrame("ScrollFrame", sfName, root, "UIPanelScrollFrameTemplate")

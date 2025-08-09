@@ -13,6 +13,8 @@ function Note.BuildNoteEditorPane(parent)
   editorArea:SetPoint("TOPLEFT", 0, -24)
   editorArea:SetPoint("BOTTOMRIGHT", -120, 36)
 
+  
+
   -- Build the scrollable editor via util (give it a name to be safe)
   local ed = FRT.Utils.CreateScrollableEdit(editorArea, {
     name             = "FRT_NoteEditorScroll", -- important for template!
@@ -22,6 +24,8 @@ function Note.BuildNoteEditorPane(parent)
     minHeight        = 200,
     insets           = { left=4, right=4, top=4, bottom=4 },
     fontObject       = "ChatFontNormal",
+    background =  "Interface\\ChatFrame\\ChatFrameBackground",
+    border =  "Interface\\Tooltips\\UI-Tooltip-Border",
   })
 
   -- Load existing text
