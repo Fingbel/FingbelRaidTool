@@ -271,6 +271,7 @@ function FRT.Utils.CreateScrollable(parent, opts)
   local INSET_T      = (opts.insets and opts.insets.top)    or 4
   local INSET_B      = (opts.insets and opts.insets.bottom) or 4
   local SAFE_PAD     = (opts.safePad ~= nil) and opts.safePad or 1
+  local ICON_SCALE  = (opts.iconScale ~= nil) and opts.iconScale or 0.85  -- 85% of line height
 
   local function snapi(v) return math.floor((v or 0) + 0.5) end
 
@@ -430,19 +431,35 @@ function FRT.Utils.CreateScrollable(parent, opts)
         newLine(DEFAULT_FONT)
 
       elseif kind == "icon" then
-        local w = tonumber(tk.w) or 12
-        local h = tonumber(tk.h) or 12
+        -- determine current line reference height (use ongoing lineH or default font)
+        local lineRefH = (lineH > 0) and lineH or baselineH(DEFAULT_FONT)
+
+        -- target size: use provided token size if given; otherwise derive from line height
+        local w = tonumber(tk.w)
+        local h = tonumber(tk.h)
+        if not h or h <= 0 then h = math.floor(lineRefH * ICON_SCALE + 0.5) end
+        if not w or w <= 0 then w = h end
+
+        -- wrap if needed (respect right pad)
         if x + w > INSET_L + contentW - SAFE_PAD and x > INSET_L then
           newLine(DEFAULT_FONT)
+          lineRefH = (lineH > 0) and lineH or baselineH(DEFAULT_FONT)
+          if not tk.h then h = math.floor(lineRefH * ICON_SCALE + 0.5) end
+          if not tk.w then w = h end
         end
+
+        -- vertical centering within the line box
+        local vOff = math.floor(((lineRefH - h) / 2) + 0.5)
+
         local t = acquireTX()
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", child, "TOPLEFT", snapi(x), y)
+        t:SetPoint("TOPLEFT", child, "TOPLEFT", snapi(x), y - vOff)
         t:SetWidth(w); t:SetHeight(h)
         if tk.tex then t:SetTexture(tk.tex) end
         if tk.tc and tk.tc[1] then t:SetTexCoord(tk.tc[1], tk.tc[2], tk.tc[3], tk.tc[4]) else t:SetTexCoord(0,1,0,1) end
         t:SetVertexColor(1,1,1,1)
         table.insert(active, t)
+
         x = snapi(x + w)
         if h > lineH then lineH = h end
 
