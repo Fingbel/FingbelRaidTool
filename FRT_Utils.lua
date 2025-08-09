@@ -2,15 +2,7 @@
 FRT = FRT or {}
 FRT.Utils = FRT.Utils or {}
 
--- Create a 1.12-safe scrollable text area inside `parent`.
--- opts:
---   name (optional): base name for the ScrollFrame (required by UIPanelScrollFrameTemplate)
---   rightColumnWidth, scrollbarWidth, padding, minHeight
---   insets = {left,right,top,bottom}
---   topPadOverlay (unused here), fontObject
---   background (bgFile blp path), border (edgeFile blp path)
---   readonly (true => non-selectable FontString; false => EditBox)
--- Returns {root, backdrop, scroll, child, edit, text, Refresh, SetText, GetText}
+
 function FRT.Utils.CreateScrollableEdit(parent, opts)
   opts = opts or {}
   local RIGHT_COL_W   = opts.rightColumnWidth or 0

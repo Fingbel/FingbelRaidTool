@@ -5,13 +5,17 @@
 ## Version: 0.1.0
 ## SavedVariables: FRT_Saved
 
-FingbelRaidTool.lua
-FingbelRaidEditor.lua
 
-modules\FRT_Utils.lua
+FingbelRaidTool.lua
+FRT_Utils.lua
+FingbelRaidEditor.lua
+FRT_Parser.lua
+FRT_TestParser.lua
 
 modules\note\FRT_NoteCore.lua
 modules\note\FRT_NoteEditorPane.lua
 modules\note\FRT_NoteViewer.lua
+
+FRT_SimpleNoteViewer.lua
 
 FRT_TestInlineRich.lua
