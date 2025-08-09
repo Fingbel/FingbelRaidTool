@@ -112,7 +112,7 @@ end
   save:SetPoint("TOPRIGHT", 0, -24)
   save:SetText("Save")
   save:SetScript("OnClick", function()
-    -- if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
+    if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
     FRT_Saved.note = ed.GetText()
     FRT.Print("Saved note.")
     Note.UpdateViewerText(Note)
@@ -144,7 +144,7 @@ end
 end
 
 function Note.ShowEditor(mod)
-  -- if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
+  if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
   if FRT and FRT.Editor and FRT.Editor.Show then
     FRT.Editor.Show("Note")
   else

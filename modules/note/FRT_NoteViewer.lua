@@ -1,9 +1,10 @@
+-- FRT_NoteViewer.lua
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
 local viewer, vresize, vlock
-local ed -- the util return (contains .scroll, .edit, .SetText, etc.)
+local ed -- util return (has .SetTokens/.SetText/.Refresh, etc.)
 
 function Note.UpdateViewerLockUI()
   if FRT_Saved.ui.viewer.locked then
@@ -16,16 +17,25 @@ function Note.UpdateViewerLockUI()
   end
 end
 
-function Note.UpdateViewerText(mod)
+function Note.UpdateViewerText()
   if not ed then return end
-  ed.SetText(tostring(FRT_Saved.note or ""))
-  -- util handles recomputing height + scrollbar range
+  local text = (FRT_Saved and FRT_Saved.note) or ""
+
+  local Parser = FRT.Note and FRT.Note.Parser
+  if Parser and Parser.Parse and ed.SetTokens then
+    local tokens = Parser.Parse(text)
+    ed.SetTokens(tokens)
+  elseif ed.SetText then
+    ed.SetText(text)  -- safe fallback
+  end
+
   if ed.Refresh then ed.Refresh() end
 end
 
-function Note.ShowViewer(mod)
+function Note.ShowViewer()
   if not viewer then return end
   viewer:Show()
+
   local sv = FRT_Saved.ui.viewer
   if type(sv.w) == "number" and type(sv.h) == "number" then
     viewer:SetWidth(sv.w); viewer:SetHeight(sv.h)
@@ -35,8 +45,9 @@ function Note.ShowViewer(mod)
   else
     FRT.SafeSetPoint(viewer, "CENTER", UIParent, "CENTER", 0, 0)
   end
+
   Note.UpdateViewerLockUI()
-  Note.UpdateViewerText(Note)
+  Note.UpdateViewerText()
 end
 
 function Note.BuildViewer()
@@ -69,24 +80,20 @@ function Note.BuildViewer()
   vt:SetPoint("TOP", 0, -10)
   vt:SetText("FRT — Raid Note")
 
-  -- Read-only scrollable area using the util
+  -- Content area
   local area = CreateFrame("Frame", nil, viewer)
   area:SetPoint("TOPLEFT", 18, -36)
   area:SetPoint("BOTTOMRIGHT", -18, 18)
 
-  ed = FRT.Utils.CreateScrollableEdit(area, {
-    name             = "FRT_ViewerScroll", -- template needs a name
-    rightColumnWidth = 18, -- to be correctly on the background
-    padding          = 0,
-    minHeight        = 50,
+  -- Token-based scrollable renderer (dumb util)
+  ed = FRT.Utils.CreateScrollable(area, {
+    name             = "FRT_ViewerScroll",
+    rightColumnWidth = 18,
     insets           = { left=0, right=0, top=0, bottom=0 },
-    topPadOverlay    = 2,                 -- tiny visual gap at top
     fontObject       = "GameFontHighlight",
-    backdrop         = nil,               -- viewer already has a dialog backdrop
-    readonly         = true,              -- << key: no caret / no typing
   })
 
-  -- lock toggle
+  -- Lock toggle
   vlock = CreateFrame("CheckButton", "FRT_ViewerLock", viewer, "UICheckButtonTemplate")
   vlock:SetWidth(18); vlock:SetHeight(18)
   vlock:SetPoint("TOPLEFT", 6, -6)
@@ -102,7 +109,7 @@ function Note.BuildViewer()
     FRT.Print("Viewer " .. (FRT_Saved.ui.viewer.locked and "locked" or "unlocked") .. ".")
   end)
 
-  -- resize handle
+  -- Resize handle
   vresize = CreateFrame("Button", nil, viewer)
   vresize:SetWidth(16); vresize:SetHeight(16)
   vresize:SetPoint("BOTTOMRIGHT", 10, -10)
@@ -119,11 +126,11 @@ function Note.BuildViewer()
   end)
   vresize:SetScript("OnMouseUp", function() viewer:StopMovingOrSizing() end)
 
-  -- close button
+  -- Close button
   local vclose = CreateFrame("Button", nil, viewer, "UIPanelCloseButton")
   vclose:SetPoint("TOPRIGHT", -5, -5)
 
-  -- Persist size + refresh
+  -- Persist size + reflow
   viewer:SetScript("OnSizeChanged", function()
     local w, h = viewer:GetWidth(), viewer:GetHeight()
     if w and h then FRT_Saved.ui.viewer.w, FRT_Saved.ui.viewer.h = w, h end
