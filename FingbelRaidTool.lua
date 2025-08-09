@@ -8,8 +8,15 @@ FRT.ADDON_PREFIX = "FRT"
 -- =================
 -- Core: Utils
 -- =================
+function FRT.ChatSafe(s)
+  s = tostring(s or "")
+  -- double every pipe so WoW renders literal '|' instead of parsing an escape
+  s = string.gsub(s, "|", "||")
+  return s
+end
+
 function FRT.Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. tostring(msg))
+  DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. FRT.ChatSafe(msg))
 end
 
 function FRT.SafeSetPoint(frame, point, relTo, relPoint, x, y)
@@ -27,14 +34,15 @@ function FRT.SendAddon(channel, text)
     text = tostring(text or "")
     if string.len(text) > 240 then
         text = string.sub(text, 1, 240)
-        FRT.Print("Note truncated to 240 chars for sending.")
+        FRT.safePrint("Note truncated to 240 chars for sending.")
     end
     FRT.RegisterAddonPrefix()
     SendAddonMessage(FRT.ADDON_PREFIX, text, channel)
 end
 
 FRT.safePrint = (FRT and FRT.Print) or function(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. tostring(msg))
+    msg = string.gsub(s, "|", "||")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. FRT.ChatSafe(msg))
 end
 
 -- ===============================

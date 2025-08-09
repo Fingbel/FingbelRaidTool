@@ -10,6 +10,8 @@ FingbelRaidTool.lua
 
 FRT_Utils.lua
 FRT_Parser.lua
+FRT_NoteNet.lua
+
 
 FingbelRaidEditor.lua
 
