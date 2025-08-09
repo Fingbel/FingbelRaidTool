@@ -38,7 +38,7 @@ function Note.OnLoad(mod)
       local prefix, message, channel, sender = arg1, arg2, arg3, arg4
       if prefix == FRT.ADDON_PREFIX and sender ~= UnitName("player") then
         FRT_Saved.note = tostring(message or "")
-        FRT.Print("Note from " .. (sender or "unknown") .. ": " .. FRT_Saved.note)
+        --FRT.Print("Note from " .. (sender or "unknown") .. ": " .. FRT_Saved.note)
         Note.UpdateViewerText(Note)
         if FRT_Saved.ui.viewer.autoOpen then Note.ShowViewer(Note) end
       end
