@@ -87,8 +87,9 @@ local function DispatchSlash(msg)
     msg = tostring(msg or "")
     local _, _, cmd, rest = string.find(msg, "^(%S*)%s*(.*)$")
     cmd = string.lower(cmd or "")
-
-    if cmd == "" or cmd == "help" then
+    if cmd == "" then
+        FRT.Note.ShowEditor() return 
+    elseif cmd == "help" then
         FRT.Print("Commands:")
         ForEachModule(function(m)
             if m.GetHelp then

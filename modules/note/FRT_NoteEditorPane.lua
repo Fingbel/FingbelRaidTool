@@ -1,12 +1,12 @@
--- Fingbel Raid Tool - Note Editor Pane 
+-- Fingbel Raid Tool - Note Editor Pane (Vanilla 1.12)
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
---============================
+-- ============================
 -- Saved & static data helpers
---============================
+-- ============================
 local function EnsureSaved()
   if type(FRT_Saved) ~= "table" then FRT_Saved = {} end
   FRT_Saved.notes = FRT_Saved.notes or {}   -- array of { id, raid, boss, title, text, created, modified }
@@ -21,7 +21,9 @@ local function RaidList()
   end
   table.sort(raids)
   local hasMisc = false
-  for i=1,table.getn(raids) do if raids[i] == "Custom/Misc" then hasMisc = true; break end end
+  for i=1, table.getn(raids) do
+    if raids[i] == "Custom/Misc" then hasMisc = true; break end
+  end
   if not hasMisc then table.insert(raids, "Custom/Misc") end
   return raids
 end
@@ -33,7 +35,9 @@ end
 
 local function BossOrderIndex(raid, boss)
   local list = BossList(raid)
-  for i=1,table.getn(list) do if list[i] == boss then return i end end
+  for i=1, table.getn(list) do
+    if list[i] == boss then return i end
+  end
   return 999
 end
 
@@ -54,7 +58,7 @@ end
 local function NotesForRaid(raid)
   local out = {}
   local arr = FRT_Saved.notes or {}
-  for i=1,table.getn(arr) do
+  for i=1, table.getn(arr) do
     local n = arr[i]
     if n and n.raid == raid then table.insert(out, n) end
   end
@@ -72,15 +76,18 @@ end
 local function FindNoteById(id)
   if not id then return nil end
   local arr = FRT_Saved.notes or {}
-  for i=1,table.getn(arr) do if arr[i] and arr[i].id == id then return arr[i], i end end
+  for i=1, table.getn(arr) do
+    if arr[i] and arr[i].id == id then return arr[i], i end
+  end
   return nil
 end
 
---=========================
-------- UI builder---------
---=========================
+-- =========================
+-- UI builder
+-- =========================
 function Note.BuildNoteEditorPane(parent)
   EnsureSaved()
+
   local uiSV = FRT_Saved.ui.notes
   local currentRaid = uiSV.selectedRaid or "Custom/Misc"
   local currentId   = uiSV.selectedId or nil
@@ -90,12 +97,12 @@ function Note.BuildNoteEditorPane(parent)
   -- forward locals for cross-calls
   local RebuildList, LoadSelected, SaveCurrent
 
-  -- Title
+  -- ==== Title ====
   local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   title:SetPoint("TOP", 0, -10)
   title:SetText("Fingbel Raid Tool - Notes Editor")
 
-  -- Raid tabs row
+  -- ==== Raid tabs row ====
   local tabs = CreateFrame("Frame", "FRT_RaidTabs", parent)
   tabs:SetPoint("TOPLEFT", 0, -26)
   tabs:SetPoint("TOPRIGHT", 0, -26)
@@ -117,11 +124,11 @@ function Note.BuildNoteEditorPane(parent)
     raidButtons = {}
     local raids = RaidList()
     local prev
-    for i=1,table.getn(raids) do
+    for i=1, table.getn(raids) do
       local rname = raids[i]
       local b = CreateFrame("Button", nil, tabs, "UIPanelButtonTemplate")
       b:SetHeight(20)
-      b:SetWidth( math.max(80, string.len(rname) * 6 + 20) )
+      b:SetWidth(math.max(80, string.len(rname) * 6 + 20))
       if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("LEFT", 0, 0) end
       b:SetText(rname)
       b:SetScript("OnClick", function()
@@ -145,9 +152,7 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
-  -- =========================
-  -- Left: Note list (scroll)
-  -- =========================
+  -- ==== Left: Note list ====
   local left = CreateFrame("Frame", "FRT_NoteList", parent)
   left:SetPoint("TOPLEFT", 0, -52)
   left:SetPoint("BOTTOMLEFT", 0, 28) -- leave room for bottom button bar
@@ -177,7 +182,7 @@ function Note.BuildNoteEditorPane(parent)
 
   local listButtons = {}
   local function ClearListButtons()
-    for i=1,table.getn(listButtons) do if listButtons[i] then listButtons[i]:Hide() end end
+    for i=1, table.getn(listButtons) do if listButtons[i] then listButtons[i]:Hide() end end
     listButtons = {}
   end
 
@@ -208,7 +213,7 @@ function Note.BuildNoteEditorPane(parent)
     local notes = NotesForRaid(currentRaid)
     local y = 0
     local lastBoss = "__NONE__"
-    for i=1,table.getn(notes) do
+    for i=1, table.getn(notes) do
       local n = notes[i]
       if (n.boss or "") ~= lastBoss then
         MakeItem(listChild, y, (n.boss or "General"), nil, true)
@@ -226,9 +231,7 @@ function Note.BuildNoteEditorPane(parent)
     listChild:SetWidth(180)
   end
 
-  -- =========================
-  -- Bottom bar (buttons)
-  -- =========================
+  -- ==== Bottom bar ====
   local bottomBar = CreateFrame("Frame", "FRT_NoteEditor_BottomBar", parent)
   bottomBar:SetPoint("BOTTOMLEFT", 0, 0)
   bottomBar:SetPoint("BOTTOMRIGHT", 0, 0)
@@ -241,13 +244,10 @@ function Note.BuildNoteEditorPane(parent)
   divider:SetTexture("Interface\\Buttons\\WHITE8x8")
   divider:SetVertexColor(1,1,1,0.10)
 
-  -- =========================
-  -- Right: Editor
-  -- =========================
+  -- ==== Right: Editor ====
   local right = CreateFrame("Frame", "FRT_NoteEditorPane", parent)
   right:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
-  -- IMPORTANT: anchor above bottom bar to avoid overlap
-  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14)
+  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14) -- anchor above bottom bar
 
   -- Boss row
   local bossLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -264,7 +264,7 @@ function Note.BuildNoteEditorPane(parent)
     dirty = true
   end)
 
-  -- Title row (NOW UNDER the boss row)
+  -- Title row
   local titleLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   titleLabel:SetPoint("TOPLEFT", bossLabel, "BOTTOMLEFT", 0, -8)
   titleLabel:SetText("Title:")
@@ -275,7 +275,7 @@ function Note.BuildNoteEditorPane(parent)
   titleBox:SetText("")
   titleBox:SetScript("OnTextChanged", function() dirty = true end)
 
-  -- Marker toolbar (under Title)
+  -- Marker toolbar
   local toolbar = CreateFrame("Frame", "FRT_NoteEditor_Toolbar", right)
   toolbar:SetPoint("TOPLEFT", titleLabel, "BOTTOMLEFT", 0, -8)
   toolbar:SetPoint("RIGHT", right, "RIGHT", 0, 0)
@@ -303,7 +303,7 @@ function Note.BuildNoteEditorPane(parent)
     for i=1,8 do lastIcon = MakeMarkerButton(toolbar, i, lastIcon, 2) end
   end
 
-  -- Text editor (scrollable edit) — anchors ABOVE bottom bar
+  -- Text editor (scrollable) — above bottom bar
   local editArea = CreateFrame("Frame", nil, right)
   editArea:SetPoint("TOPLEFT", toolbar, "BOTTOMLEFT", 0, -8)
   editArea:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", 0, -8)
@@ -320,40 +320,7 @@ function Note.BuildNoteEditorPane(parent)
     readonly         = false,
   })
 
-  -- bottom bar buttons
-  local btnNew = CreateFrame("Button", "FRT_NoteBtn_New", bottomBar, "UIPanelButtonTemplate")
-  btnNew:SetWidth(80); btnNew:SetHeight(22)
-  btnNew:SetPoint("LEFT", 0, 0); btnNew:SetText("New")
-
-  local btnDup = CreateFrame("Button", "FRT_NoteBtn_Dup", bottomBar, "UIPanelButtonTemplate")
-  btnDup:SetWidth(80); btnDup:SetHeight(22)
-  btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0); btnDup:SetText("Duplicate")
-
-  local btnDel = CreateFrame("Button", "FRT_NoteBtn_Del", bottomBar, "UIPanelButtonTemplate")
-  btnDel:SetWidth(80); btnDel:SetHeight(22)
-  btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0); btnDel:SetText("Delete")
-
-  local btnShare = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
-  btnShare:SetWidth(80); btnShare:SetHeight(22)
-  btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
-  if(not FRT.IsInRaid()) then 
-    btnShare:Disable()
-  else if (not FRT.IsLeaderOrOfficer())then 
-      btnShare:Disable()
-      end
-  end
-
-  local btnSaveAs = CreateFrame("Button", "FRT_NoteBtn_SaveAs", bottomBar, "UIPanelButtonTemplate")
-  btnSaveAs:SetWidth(80); btnSaveAs:SetHeight(22)
-  btnSaveAs:SetPoint("RIGHT", btnShare, "LEFT", -6, 0); btnSaveAs:SetText("Save As")
-
-  local btnSave = CreateFrame("Button", "FRT_NoteBtn_Save", bottomBar, "UIPanelButtonTemplate")
-  btnSave:SetWidth(80); btnSave:SetHeight(22)
-  btnSave:SetPoint("RIGHT", btnSaveAs, "LEFT", -6, 0); btnSave:SetText("Save")
-
-  --================
-  ---Live preview---
-  --================
+  -- Live preview helpers
   local function EnsureViewerVisible()
     if Note.EnsureViewer then Note.EnsureViewer() end
     if Note.ShowViewer then Note.ShowViewer() end
@@ -397,7 +364,7 @@ function Note.BuildNoteEditorPane(parent)
   end
 
   -- ================
-  -- Load/save helpers
+  -- Load/save/share
   -- ================
   LoadSelected = function(id)
     currentId = id
@@ -417,6 +384,8 @@ function Note.BuildNoteEditorPane(parent)
     end
     dirty = false
     UpdatePreviewFromEditor()
+    -- share state may change due to text programmatically set
+    if UpdateShareButtonState then UpdateShareButtonState() end
   end
 
   local function GatherEditor()
@@ -429,7 +398,7 @@ function Note.BuildNoteEditorPane(parent)
     local data = GatherEditor()
     local now  = GetTime()
     if currentId then
-      local n, idx = FindNoteById(currentId)
+      local n = FindNoteById(currentId)
       if n then
         n.raid = data.raid; n.boss = data.boss; n.title = data.title; n.text = data.text
         n.modified = now
@@ -445,6 +414,7 @@ function Note.BuildNoteEditorPane(parent)
     FRT.Print("Note saved.")
     dirty = false
     RebuildList()
+    if UpdateShareButtonState then UpdateShareButtonState() end
   end
 
   local function SaveAs()
@@ -459,6 +429,7 @@ function Note.BuildNoteEditorPane(parent)
     FRT.Print("Note saved as new.")
     dirty = false
     RebuildList()
+    if UpdateShareButtonState then UpdateShareButtonState() end
   end
 
   local function NewNote()
@@ -469,6 +440,7 @@ function Note.BuildNoteEditorPane(parent)
     ed.SetText("")
     dirty = true
     UpdatePreviewFromEditor()
+    if UpdateShareButtonState then UpdateShareButtonState() end
   end
 
   local function DeleteNote()
@@ -480,6 +452,7 @@ function Note.BuildNoteEditorPane(parent)
     currentId = nil; uiSV.selectedId = nil
     RebuildList()
     LoadSelected(nil)
+    if UpdateShareButtonState then UpdateShareButtonState() end
   end
 
   local function ShareCurrent()
@@ -489,6 +462,7 @@ function Note.BuildNoteEditorPane(parent)
       FRT.Print("Sharing unavailable (NoteNet not loaded)."); return
     end
     if (GetNumRaidMembers() or 0) > 0 then
+      -- In raid, your gating should already have ensured leader/assist; still safe to try
       FRT.NoteNet.Send(data.text, "RAID");  FRT.Print("Shared to RAID.")
     elseif (GetNumPartyMembers() or 0) > 0 then
       FRT.NoteNet.Send(data.text, "PARTY"); FRT.Print("Shared to PARTY.")
@@ -497,6 +471,71 @@ function Note.BuildNoteEditorPane(parent)
     else
       FRT.Print("You are not in a group.")
     end
+  end
+
+  -- =========================
+  -- Share button + state
+  -- =========================
+  local btnNew   = CreateFrame("Button", "FRT_NoteBtn_New", bottomBar, "UIPanelButtonTemplate")
+  local btnDup   = CreateFrame("Button", "FRT_NoteBtn_Dup", bottomBar, "UIPanelButtonTemplate")
+  local btnDel   = CreateFrame("Button", "FRT_NoteBtn_Del", bottomBar, "UIPanelButtonTemplate")
+  local btnSave  = CreateFrame("Button", "FRT_NoteBtn_Save", bottomBar, "UIPanelButtonTemplate")
+  local btnSaveAs= CreateFrame("Button", "FRT_NoteBtn_SaveAs", bottomBar, "UIPanelButtonTemplate")
+  local btnShare  = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
+
+  local function CanShareNow()
+    -- must have NoteNet and some text
+    if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
+    local txt = (ed and ed.GetText and ed.GetText()) or ""
+    if txt == "" then return false end
+
+    -- In raid: only leader/assistant
+    if FRT.IsInRaid and FRT.IsInRaid() then
+      return (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) and true or false
+    end
+
+    -- Outside raid: allow party or guild
+    if (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0 then return true end
+    if IsInGuild and IsInGuild() then return true end
+    return false
+  end
+
+  local function UpdateShareButtonState()
+    if not btnShare then return end
+    if CanShareNow() then btnShare:Enable() else btnShare:Disable() end
+  end
+
+  -- layout bottom buttons
+
+  btnNew:SetWidth(80);  btnNew:SetHeight(22);  btnNew:SetPoint("LEFT", 0, 0);                   btnNew:SetText("New")
+  btnDup:SetWidth(80);  btnDup:SetHeight(22);  btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);  btnDup:SetText("Duplicate")
+  btnDel:SetWidth(80);  btnDel:SetHeight(22);  btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);  btnDel:SetText("Delete")
+  btnShare:SetWidth(80);btnShare:SetHeight(22);btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
+  btnSaveAs:SetWidth(80);btnSaveAs:SetHeight(22);btnSaveAs:SetPoint("RIGHT", btnShare, "LEFT", -6, 0); btnSaveAs:SetText("Save As")
+  btnSave:SetWidth(80); btnSave:SetHeight(22); btnSave:SetPoint("RIGHT", btnSaveAs, "LEFT", -6, 0);   btnSave:SetText("Save")
+
+  UpdateShareButtonState()
+
+  -- ========== Event watcher (no varargs) ==========
+  local watch = CreateFrame("Frame", nil, bottomBar)
+  watch:RegisterEvent("PLAYER_ENTERING_WORLD")
+  watch:RegisterEvent("PARTY_MEMBERS_CHANGED")
+  watch:RegisterEvent("PARTY_LEADER_CHANGED")
+  watch:RegisterEvent("RAID_ROSTER_UPDATE")
+  watch:RegisterEvent("GUILD_ROSTER_UPDATE")
+  watch:SetScript("OnEvent", function()
+    UpdateShareButtonState()
+  end)
+
+
+  -- ========== Edit box changed (Lua 5.0: no '...') ==========
+  if ed and ed.edit and ed.edit.SetScript then
+    ed.edit:SetScript("OnTextChanged", function()
+      dirty = true
+      UpdatePreviewFromEditor()
+      if ed.Refresh then ed.Refresh() end
+      UpdateShareButtonState()
+    end)
   end
 
   -- Wire buttons
@@ -518,7 +557,8 @@ function Note.BuildNoteEditorPane(parent)
 end
 
 function Note.ShowEditor(mod)
-  if FRT.IsInRaid() and not FRT.IsLeaderOrOfficer()then
+  -- Only restrict when in a raid
+  if FRT.IsInRaid and FRT.IsInRaid() and not (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) then
     FRT.Print("Editor requires raid lead or assist.")
     return
   end
