@@ -1,4 +1,4 @@
--- FRT_TestInlineRich.lua (Vanilla 1.12)
+-- FRT_TestInlineRich.lua
 SLASH_FRTSMF1 = "/frtsmf"
 SlashCmdList["FRTSMF"] = function()
   if FRT_TestInlineRich then

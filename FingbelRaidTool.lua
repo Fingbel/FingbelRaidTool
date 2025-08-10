@@ -1,9 +1,9 @@
--- Fingbel Raid Tool (Core)
--- SavedVariables: FRT_Saved
+-- Fingbel Raid Tool - Core File
 
 FRT = FRT or {}
 FRT.Modules = FRT.Modules or {}
 FRT.ADDON_PREFIX = "FRT"
+FRT.VERSION = "0.1.0"
 
 -- =================
 -- Core: Utils
@@ -41,19 +41,30 @@ function FRT.SendAddon(channel, text)
 end
 
 FRT.safePrint = (FRT and FRT.Print) or function(msg)
-    msg = string.gsub(s, "|", "||")
+    msg = string.gsub(msg, "|", "||")
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[FRT]|r " .. FRT.ChatSafe(msg))
 end
 
 -- ===============================
--- Helpers (1.12/Turtle WoW APIs)
+-- Helpers 
 -- ===============================
+
 function FRT.IsLeaderOrOfficer()
-  if (GetNumRaidMembers() or 0) > 0 then
-    if IsRaidLeader and IsRaidLeader() then return true end
-    if IsRaidOfficer and IsRaidOfficer() then return true end
-  end
+  -- Inside a raid: must be leader or officer
+  if IsRaidLeader and IsRaidLeader() then return true end
+  if IsRaidOfficer and IsRaidOfficer() then return true end
+
   return false
+end
+
+function FRT.IsInRaid()
+    local raidMembers = (GetNumRaidMembers and GetNumRaidMembers() or 0)
+    if raidMembers == 0 then
+        return false
+    else
+        return true 
+    end
+
 end
 
 -- =================
@@ -76,8 +87,9 @@ local function DispatchSlash(msg)
     msg = tostring(msg or "")
     local _, _, cmd, rest = string.find(msg, "^(%S*)%s*(.*)$")
     cmd = string.lower(cmd or "")
-
-    if cmd == "" or cmd == "help" then
+    if cmd == "" then
+        FRT.Note.ShowEditor() return 
+    elseif cmd == "help" then
         FRT.Print("Commands:")
         ForEachModule(function(m)
             if m.GetHelp then

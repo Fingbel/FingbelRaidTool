@@ -1,4 +1,5 @@
--- FRT_NoteViewer.lua
+-- Fingbel Raid Tool - Note Viewer
+
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
@@ -115,7 +116,7 @@ function Note.BuildViewer()
   vresize:SetPoint("BOTTOMRIGHT", 10, -10)
   vresize:SetFrameLevel(viewer:GetFrameLevel() + 10)
   vresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  vresize:GetNormalTexture():SetVertexColor(1,1,1,0.9)
+  vresize:GetNormalTexture():SetVertexColor(1,1,1,1)
   vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
   vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   vresize:SetAlpha(0.4)
@@ -139,4 +140,32 @@ function Note.BuildViewer()
 
   viewer:Hide()
   Note.UpdateViewerLockUI()
+end
+
+-- ===== Live preview helpers  =====
+function Note.EnsureViewer()
+  if not viewer then Note.BuildViewer() end
+  return viewer
+end
+
+-- Push raw text to the viewer WITHOUT touching FRT_Saved.note
+function Note.SetViewerRaw(raw)
+  if not ed then return end
+  local Parser = (FRT.Note and FRT.Note.Parser) or FRT.Parser
+  local s = tostring(raw or "")
+  if Parser and Parser.Parse then
+    ed.SetTokens(Parser.Parse(s))
+  elseif Parser and Parser.ParseNote then
+    ed.SetTokens(Parser.ParseNote(s))
+  else
+    ed.SetTokens({ { kind="text", value=s, font="GameFontHighlight" } })
+  end
+  if ed.Refresh then ed.Refresh() end
+end
+
+-- If you already have tokens and just want to render them
+function Note.SetViewerTokens(tokens)
+  if not ed then return end
+  ed.SetTokens(tokens or {})
+  if ed.Refresh then ed.Refresh() end
 end
