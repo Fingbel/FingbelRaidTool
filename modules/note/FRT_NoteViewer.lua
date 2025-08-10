@@ -1,4 +1,5 @@
--- FRT_NoteViewer.lua
+-- Fingbel Raid Tool - Note Viewer
+
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
@@ -115,7 +116,7 @@ function Note.BuildViewer()
   vresize:SetPoint("BOTTOMRIGHT", 10, -10)
   vresize:SetFrameLevel(viewer:GetFrameLevel() + 10)
   vresize:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  vresize:GetNormalTexture():SetVertexColor(1,1,1,0.9)
+  vresize:GetNormalTexture():SetVertexColor(1,1,1,1)
   vresize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
   vresize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   vresize:SetAlpha(0.4)

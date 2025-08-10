@@ -1,4 +1,4 @@
--- Fingbel Raid Tool — Global Editor Host (1.12, bigger + resizable with handle)
+-- Fingbel Raid Tool — Main Editor Host 
 FRT = FRT or {}
 FRT.Editor = FRT.Editor or {}
 
@@ -105,7 +105,7 @@ function E:_CreateWindowOnce()
 
   local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   title:SetPoint("TOP", 0, -10)
-  title:SetText("Fingbel Raid Editor")
+  title:SetText("Fingbel Raid Tool")
 
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -5, -5)
@@ -161,7 +161,7 @@ function E:_RebuildButtons()
   self._buttons = {}
 
   local names = {}
-  for name,_ in pairs(self._panels) do table.insert(names, name) end
+  for n,_ in pairs(self._panels) do table.insert(names, n) end
   table.sort(names, function(a,b)
     local pa, pb = self._panels[a], self._panels[b]
     if pa.order ~= pb.order then return pa.order < pb.order end
@@ -172,10 +172,15 @@ function E:_RebuildButtons()
   for _, name in ipairs(names) do
     local info = self._panels[name]
     local btn = CreateFrame("Button", nil, self.left, "UIPanelButtonTemplate")
-    btn:SetWidth(80); btn:SetHeight(20) -- slightly wider for the wider left pane
+    btn:SetWidth(80); btn:SetHeight(20)
     btn:SetPoint("TOPLEFT", 10, y)
     btn:SetText(info.title or name)
-    btn:SetScript("OnClick", function() E:_Select(name) end)
+
+    local panelName = name  -- capture a fresh local for the closure
+    btn:SetScript("OnClick", function()
+      E:_Select(panelName)
+    end)
+
     self._buttons[name] = btn
     y = y - 24
   end

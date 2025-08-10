@@ -1,4 +1,5 @@
--- FRT_NoteNet.lua (Vanilla 1.12-safe, no '|' in addon traffic)
+-- Fingbel Raid Tool - NoteNet
+
 FRT = FRT or {}
 FRT.NoteNet = FRT.NoteNet or {}
 
@@ -7,21 +8,25 @@ do
 
   if FRT.RegisterAddonPrefix then FRT.RegisterAddonPrefix() end
 
-  -- ---------- Config ----------
+  --===============================
+  ------------- Config ------------
+  --===============================
   local PREFIX          = FRT.ADDON_PREFIX or "FRT"
   local FRAME_TAG       = "N"        -- first byte/tag
-  local SEP             = "\t"       -- safe separator (no pipes!)
+  local SEP             = "\t"       -- separator 
   local MAX_LEN         = 240
   local SEND_STEP       = 0.20
   local CLEAN_AFTER     = 30
 
   -- Worst-case header for budget: "N\tv1\tID=999999\tS=999/999\tC=FFFF\t"
   local HEADER_WORST   = string.len(FRAME_TAG..SEP.."v1"..SEP.."ID=999999"..SEP.."S=999/999"..SEP.."C=FFFF"..SEP)
-  -- Leave extra headroom for payload encoding (~ and | expansion)
+  -- Leave extra headroom for payload encoding 
   local PAYLOAD_BUDGET = (MAX_LEN - HEADER_WORST) - 16
   if PAYLOAD_BUDGET < 32 then PAYLOAD_BUDGET = 32 end
 
-  -- ---------- Tiny checksum (16-bit) ----------
+  -- ===============================
+  ---- Tiny checksum (16-bit) ------
+  -- ===============================
   local function csum16(s)
     local sum = 0
     for i = 1, string.len(s or "") do
@@ -41,7 +46,9 @@ do
     return hx(hi) .. hx(lo)
   end
 
-  -- ---------- Payload encoding (avoid raw '|') ----------
+  --===============================
+  ----- Payload encoding  ---------
+  --===============================
   local function encPayload(s)
     -- escape order matters: escape '~' first
     s = string.gsub(s or "", "~", "~~")
@@ -55,7 +62,9 @@ do
     return s
   end
 
-  -- ---------- Tag-safe split helpers ----------
+  --===============================
+  ----- Tag-safe split helpers ----
+  --===============================
   local function collectProtectedRanges(s)
     local ranges = {}
     local i = 1
@@ -115,7 +124,9 @@ do
     return j
   end
 
-  -- ---------- Sender (throttled queue, 1.12 uses arg1) ----------
+  --===============================
+  ------------- Sender ------------
+  --===============================
   local sendQ = {}
   local pump = CreateFrame("Frame"); pump:Hide()
   local acc = 0
@@ -148,13 +159,15 @@ do
     return tostring(nextId)
   end
 
-  -- ---------- Public send ----------
+  --===============================
+  ---------- Public send ----------
+  --===============================
   function Net.Send(noteText, channel, target)
     local raw = tostring(noteText or "")
     local id  = newId()
     local chk = tohex16(csum16(raw))
 
-    -- 1) Chunk on raw (safe for tags)
+    -- 1) Chunk on raw 
     local ranges = collectProtectedRanges(raw)
     local parts  = {}
     local i, n = 1, string.len(raw)
@@ -187,7 +200,9 @@ do
     return { id = id, total = total, checksum = chk }
   end
 
-  -- ---------- Receiver / reassembly ----------
+  --===============================
+  ---- Receiver / reassembly ------
+  --===============================
   local assemblies = {} -- key = sender..":"..id
   local function keyOf(sender, id) return (sender or "?") .. ":" .. (id or "?") end
 

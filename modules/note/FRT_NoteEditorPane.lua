@@ -1,11 +1,12 @@
--- Fingbel Raid Tool - Note Editor Pane (multi-note authoring, 1.12 safe)
+-- Fingbel Raid Tool - Note Editor Pane 
+
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
--- ---------------------------
+--============================
 -- Saved & static data helpers
--- ---------------------------
+--============================
 local function EnsureSaved()
   if type(FRT_Saved) ~= "table" then FRT_Saved = {} end
   FRT_Saved.notes = FRT_Saved.notes or {}   -- array of { id, raid, boss, title, text, created, modified }
@@ -75,9 +76,9 @@ local function FindNoteById(id)
   return nil
 end
 
--- ---------------------------
--- UI builder
--- ---------------------------
+--=========================
+------- UI builder---------
+--=========================
 function Note.BuildNoteEditorPane(parent)
   EnsureSaved()
   local uiSV = FRT_Saved.ui.notes
@@ -92,11 +93,9 @@ function Note.BuildNoteEditorPane(parent)
   -- Title
   local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   title:SetPoint("TOP", 0, -10)
-  title:SetText("Fingbel Raid Editor - Notes")
+  title:SetText("Fingbel Raid Tool - Notes Editor")
 
-  -- =========================
   -- Raid tabs row
-  -- =========================
   local tabs = CreateFrame("Frame", "FRT_RaidTabs", parent)
   tabs:SetPoint("TOPLEFT", 0, -26)
   tabs:SetPoint("TOPRIGHT", 0, -26)
@@ -337,6 +336,12 @@ function Note.BuildNoteEditorPane(parent)
   local btnShare = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
   btnShare:SetWidth(80); btnShare:SetHeight(22)
   btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
+  if(not FRT.IsInRaid()) then 
+    btnShare:Disable()
+  else if (not FRT.IsLeaderOrOfficer())then 
+      btnShare:Disable()
+      end
+  end
 
   local btnSaveAs = CreateFrame("Button", "FRT_NoteBtn_SaveAs", bottomBar, "UIPanelButtonTemplate")
   btnSaveAs:SetWidth(80); btnSaveAs:SetHeight(22)
@@ -346,9 +351,9 @@ function Note.BuildNoteEditorPane(parent)
   btnSave:SetWidth(80); btnSave:SetHeight(22)
   btnSave:SetPoint("RIGHT", btnSaveAs, "LEFT", -6, 0); btnSave:SetText("Save")
 
-  -- ---------------
-  -- Live preview
-  -- ---------------
+  --================
+  ---Live preview---
+  --================
   local function EnsureViewerVisible()
     if Note.EnsureViewer then Note.EnsureViewer() end
     if Note.ShowViewer then Note.ShowViewer() end
@@ -391,9 +396,9 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
-  -- -----------------
+  -- ================
   -- Load/save helpers
-  -- -----------------
+  -- ================
   LoadSelected = function(id)
     currentId = id
     uiSV.selectedId = id
@@ -513,7 +518,10 @@ function Note.BuildNoteEditorPane(parent)
 end
 
 function Note.ShowEditor(mod)
-  if not FRT.IsLeaderOrOfficer() then FRT.Print("Editor requires raid lead or assist."); return end
+  if FRT.IsInRaid() and not FRT.IsLeaderOrOfficer()then
+    FRT.Print("Editor requires raid lead or assist.")
+    return
+  end
   if FRT and FRT.Editor and FRT.Editor.Show then
     FRT.Editor.Show("Note")
   else

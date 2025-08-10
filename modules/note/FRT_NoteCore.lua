@@ -1,4 +1,5 @@
--- Fingbel Raid Tool - Note Module (1.12-safe binder)
+-- Fingbel Raid Tool - Note Core Module
+
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 Note.name = "Note"
