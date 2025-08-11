@@ -361,6 +361,18 @@ local function RebuildFilter(roster, results, visibleCols)
   end
 end
 
+local function LockGrowthTopLeft(frame)
+  if not frame or frame._growthLockedTemp then return end
+  local l, t = frame:GetLeft(), frame:GetTop()
+  if l and t then
+    frame._growthLockedTemp = true         -- guard against re-entrancy
+    frame:ClearAllPoints()
+    -- Place the frame's TOPLEFT at the exact screen coords we captured
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+    frame._growthLockedTemp = nil
+  end
+end
+
 --===============================
 -- Refresh pipeline
 --===============================
@@ -401,7 +413,7 @@ local function RefreshGrid()
       if othersNeed then
         UI.empty.l2.tex:SetTexture(TEX_CROSS)
         UI.empty.l2.tex:SetVertexColor(1.0, 0.2, 0.2, 1.0)
-        UI.empty.l2.msg:SetText("Raid still missing buffs")
+        UI.empty.l2.msg:SetText("Raid is missing buffs")
       else
         UI.empty.l2.tex:SetTexture(TEX_CHECK)
         UI.empty.l2.tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
@@ -440,15 +452,29 @@ local function RefreshGrid()
 end
 
 --===============================
--- Build UI ( +/- left of title; colored glyph; content below )
+-- Build UI ( +/- left of title; grows right & down )
 --===============================
 local function BuildUI()
   if UI.frame then return end
 
+  -- Helper: pin TOPLEFT so size changes grow to the right & down
+  local function LockGrowthTopLeft(frame)
+    if not frame or frame._growthLockedTemp then return end
+    local l, t = frame:GetLeft(), frame:GetTop()
+    if l and t then
+      frame._growthLockedTemp = true
+      frame:ClearAllPoints()
+      frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+      frame._growthLockedTemp = nil
+    end
+  end
+
   local f = CreateFrame("Frame", "FRT_CheckerFrame", UIParent)
+  -- Start centered; we’ll relock to TOPLEFT on first Show and after drags
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetWidth(400); f:SetHeight(200)
   f:SetFrameStrata("DIALOG")
+  f:SetClampedToScreen(true)
   f:SetBackdrop({
     bgFile  = "Interface\\Tooltips\\UI-Tooltip-Background",
     edgeFile= "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -462,7 +488,7 @@ local function BuildUI()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
-  -- Drag area
+  -- Drag strip (whole top edge)
   f:SetMovable(true); f:EnableMouse(true)
   local drag = CreateFrame("Frame", nil, f)
   drag:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -8)
@@ -470,9 +496,9 @@ local function BuildUI()
   drag:SetHeight(28); drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
   drag:SetScript("OnDragStart", function() f:StartMoving() end)
-  drag:SetScript("OnDragStop",  function() f:StopMovingOrSizing() end)
+  drag:SetScript("OnDragStop",  function() f:StopMovingOrSizing(); LockGrowthTopLeft(f) end)
 
-  -- Top bar: +/- left, title right
+  -- Top bar: +/- button (left) + title
   local topBar = CreateFrame("Frame", nil, f)
   topBar:SetPoint("TOPLEFT", f, "TOPLEFT", PAD_LEFT, -12)
   topBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD_RIGHT, -12)
@@ -482,7 +508,7 @@ local function BuildUI()
   topBar:SetScript("OnDragStart", function()
     if not MouseIsOver(topBar._expandBtn) then f:StartMoving() end
   end)
-  topBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+  topBar:SetScript("OnDragStop", function() f:StopMovingOrSizing(); LockGrowthTopLeft(f) end)
   UI.topBar = topBar
 
   local expandBtn = CreateFrame("Button", nil, topBar)
@@ -493,14 +519,25 @@ local function BuildUI()
 
   local glyph = expandBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   glyph:SetPoint("CENTER", expandBtn, "CENTER", 0, 0)
-  glyph:SetTextColor(0.35, 0.9, 1.0)
+  glyph:SetTextColor(0.35, 0.9, 1.0) -- teal
+
   local function UpdateExpandGlyph()
-    if UI.expand then glyph:SetText("-"); expandBtn.tooltip = "Show only my buffs"
-    else glyph:SetText("+"); expandBtn.tooltip = "Show all buffs" end
+    if UI.expand then
+      glyph:SetText("-"); expandBtn.tooltip = "Show only my buffs"
+    else
+      glyph:SetText("+"); expandBtn.tooltip = "Show all buffs"
+    end
   end
-  expandBtn:SetScript("OnClick", function() UI.expand = not UI.expand; UpdateExpandGlyph(); RefreshGrid() end)
+  expandBtn:SetScript("OnClick", function()
+    UI.expand = not UI.expand
+    UpdateExpandGlyph()
+    RefreshGrid()
+  end)
   expandBtn:SetScript("OnEnter", function()
-    if expandBtn.tooltip then GameTooltip:SetOwner(expandBtn, "ANCHOR_BOTTOMRIGHT"); GameTooltip:SetText(expandBtn.tooltip) end
+    if expandBtn.tooltip then
+      GameTooltip:SetOwner(expandBtn, "ANCHOR_BOTTOMRIGHT")
+      GameTooltip:SetText(expandBtn.tooltip)
+    end
   end)
   expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
   UpdateExpandGlyph()
@@ -509,31 +546,32 @@ local function BuildUI()
   title:SetPoint("LEFT", expandBtn, "RIGHT", 8, 0)
   title:SetText("Buffs")
 
-  -- Content area
+  -- Content area (headers / rows / empty overlay live here)
   local content = CreateFrame("Frame", nil, f)
   content:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -4)
   content:SetPoint("TOPRIGHT", topBar, "BOTTOMRIGHT", 0, -4)
   content:SetHeight(ROW_HEIGHT)
   UI.content = content
 
-  -- Header (re-anchored flat to content)
+  -- Header
   UI.header = CreateHeader(content)
   UI.header:ClearAllPoints()
   UI.header:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
   UI.header:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
 
-  -- Rows list
+  -- Rows list (below header)
   local list = CreateFrame("Frame", nil, content)
   list:SetPoint("TOPLEFT", UI.header, "BOTTOMLEFT", 0, 0)
   list:SetPoint("TOPRIGHT", UI.header, "BOTTOMRIGHT", 0, 0)
   list:SetHeight(ROW_HEIGHT)
   UI.list = list
 
-  -- Empty overlay on content (anchored just under the title, left-aligned with Name)
+  -- Empty overlay anchored to content (left-aligned with Name column)
   EnsureEmptyOverlay(UI.content)
 
   -- Live updates while visible
   f:SetScript("OnShow", function()
+    LockGrowthTopLeft(f) -- convert center anchor to top-left once visible
     if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(true) end
     RefreshGrid()
   end)
@@ -544,6 +582,7 @@ local function BuildUI()
   UI.frame = f
   UI.rows  = nil
 end
+
 
 --===============================
 -- Viewer public
