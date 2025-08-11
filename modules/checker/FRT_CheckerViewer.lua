@@ -1,5 +1,5 @@
--- Fingbel Raid Tool - Checker Viewer (auto-sized, no scrolling, tight)
--- Depends on FRT_CheckerCore
+-- Fingbel Raid Tool - Checker Viewer (auto-sized, no scrolling, tight, with live range checks)
+-- Depends on FRT_CheckerCore + FRT_Casting (for range checks)
 -- Turtle WoW / Vanilla 1.12 / Lua 5.0
 
 FRT = FRT or {}
@@ -10,7 +10,7 @@ FRT = FRT or {}
 local ROW_HEIGHT   = 18
 local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
-local TEX_WARN    =  "Interface\\GossipFrame\\AvailableQuestIcon"
+local TEX_WARN     = "Interface\\GossipFrame\\AvailableQuestIcon"
 
 -- Layout (tight)
 local HEADER_TOP_OFFSET = 38
@@ -21,7 +21,7 @@ local PAD_BELOW_HEADER  = 0
 local PAD_BOTTOM        = 4
 
 local NAME_START_X = 8
-local COL_START_X  = 90
+local COL_START_X  = 90     -- width of the name column
 local COL_W        = 18
 local COL_SP       = 10
 local HEADER_COL_W = 22
@@ -30,7 +30,10 @@ local HEADER_COL_SP= 6
 -- Empty overlay line sizes
 local EMPTY_ICON  = 24
 local EMPTY_GAP   = 2
-local EMPTY_TOTAL = EMPTY_ICON + EMPTY_GAP + EMPTY_ICON 
+local EMPTY_TOTAL = EMPTY_ICON + EMPTY_GAP + EMPTY_ICON
+
+-- Range polling
+local RANGE_TICK_SEC = 0.25  -- how often to refresh range UI
 
 --===============================
 -- Local UI state
@@ -39,10 +42,12 @@ local UI = {
   frame=nil, header=nil, rows=nil, list=nil, empty=nil, content=nil, topBar=nil,
   expand=false,            -- default: my buffs only; true: all buffs
   filteredIndex={},
+  visibleCols=nil,
+  _rangeAccum=0,
 }
 
 --===============================
--- Helpers
+-- Helpers (colors, filters, range)
 --===============================
 local function ClassColorRGB(class)
   local t = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
@@ -65,14 +70,24 @@ end
 -- Column filter: default only buffs I can provide; expand=true shows all
 local function FilterColumnsForView(allCols)
   if UI.expand then return allCols end
-  local filtered, i = {}, 1
-  while i <= table.getn(allCols) do
-    local col = allCols[i]
-    local ok = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)
-    if ok then table.insert(filtered, col) end
-    i = i + 1
-  end
-  return filtered
+  return FilterMyColumns(allCols)
+end
+
+local function IsVisiblyReachable(unit)
+  if not unit then return false end
+  if UnitIsConnected and UnitIsConnected(unit) == 0 then return false end
+  if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return false end
+  if UnitIsVisible and not UnitIsVisible(unit) then return false end
+  return true
+end
+
+-- Prefer single-spell range checks; group buffs often give nil with IsSpellInRange
+local function IsAnyBuffInRange(key, unit)
+  if not (FRT.Cast and FRT.Cast.InRangeByKey) then return true end -- fail-open if casting module missing
+  local singleOK = FRT.Cast.InRangeByKey(key, unit, false)
+  if singleOK then return true end
+  local groupOK  = FRT.Cast.InRangeByKey(key, unit, true)
+  return groupOK and true or false
 end
 
 --===============================
@@ -83,14 +98,13 @@ local function CreateHeader(parent)
   header:SetHeight(HEADER_HEIGHT)
   header:SetPoint("TOPLEFT", parent, "TOPLEFT", PAD_LEFT, -HEADER_TOP_OFFSET - 20)
   header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -PAD_RIGHT, -HEADER_TOP_OFFSET - 20)
-  
 
   local name = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  name:SetPoint("LEFT", header, "LEFT", NAME_START_X, 0)
+  name:SetPoint("LEFT",  header, "LEFT", NAME_START_X, 0)
   name:SetPoint("RIGHT", header, "LEFT", COL_START_X - 4, 0)
   name:SetJustifyH("LEFT")
   name:SetText("Name")
-  
+
   header.name = name
   header.cols = {}
   return header
@@ -152,10 +166,10 @@ local function CreateRow(parent)
   row:SetHeight(ROW_HEIGHT)
 
   local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  name:SetPoint("LEFT", row, "LEFT", NAME_START_X, 0)  
-  name:SetText("Player")
+  name:SetPoint("LEFT", row, "LEFT", NAME_START_X, 0)
   name:SetPoint("RIGHT", row, "LEFT", COL_START_X - 4, 0)
-  name:SetJustifyH("LEFT")  
+  name:SetJustifyH("LEFT")
+  name:SetText("Player")
   row.name = name
 
   row.cells = {}
@@ -181,26 +195,16 @@ local function SetRowCells(row, numCols)
     f:SetScript("OnClick", function()
       if not f.key or not f.unit then return end
       if not f._missing then return end
+      if not f._inRange and f.visible then
+        if FRT and FRT.Print then FRT.Print("|cffffcc00Out of range.|r") end
+        return
+      end
       local useGroup = (arg1 == "RightButton")
-      if FRT.CheckerCore and FRT.CheckerCore.TryCast then FRT.CheckerCore.TryCast(f.key, f.unit, useGroup) end
+      if FRT.CheckerCore and FRT.CheckerCore.TryCast then
+        FRT.CheckerCore.TryCast(f.key, f.unit, useGroup)
+      end
     end)
 
-    f:SetScript("OnEnter", function()
-      if not f.key then return end
-      GameTooltip:SetOwner(f, "ANCHOR_RIGHT")
-      GameTooltip:SetText(f._colLabel or "Buff")
-      if f._canCast then
-        GameTooltip:AddLine("Left-click: single buff", 0,1,0)
-        GameTooltip:AddLine("Right-click: group buff (if known)", 0,1,0)
-      else
-        if not f._missing then
-          GameTooltip:AddLine("Already present or N/A.", 0.8,0.8,0.8)
-        else
-          GameTooltip:AddLine("You cannot cast this buff.", 1,0.3,0.3)
-        end
-      end
-      GameTooltip:Show()
-    end)
     f:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     row.cells[i] = f
@@ -208,6 +212,37 @@ local function SetRowCells(row, numCols)
   end
 end
 
+-- Update cell interactivity/alpha based on current range
+local function UpdateCellRangeDecor(cell)
+  -- Only care about cells you can cast AND that are missing on the target
+  if not (cell and cell._canCast and cell._missing and cell.unit and cell.key) then
+    -- keep non-clickable cells at a consistent dim
+    if cell then
+      cell:EnableMouse(false)
+      cell:RegisterForClicks()
+      cell:SetAlpha(0.6)
+    end
+    return
+  end
+
+  local inRange = IsAnyBuffInRange(cell.key, cell.unit)
+  local visible = IsVisiblyReachable(cell.unit)
+
+  cell._inRange = inRange
+  cell._visible = visible
+
+  if inRange and visible then
+    cell:EnableMouse(true)
+    cell:RegisterForClicks("LeftButtonDown","RightButtonDown")
+    cell:SetAlpha(1.0)
+  else
+    cell:EnableMouse(false)
+    cell:RegisterForClicks()
+    cell:SetAlpha(0.35) -- clearly greyed out when out of range
+  end
+end
+
+-- Update one row based on roster entry and columns (presence + base visuals)
 local function UpdateRowVisual(row, rosterEntry, cols, results)
   if not rosterEntry then row:Hide(); return end
   row:Show()
@@ -220,15 +255,21 @@ local function UpdateRowVisual(row, rosterEntry, cols, results)
 
   local i=1
   while i <= table.getn(cols) do
-    local key, cell, tex = cols[i].key, row.cells[i], row.cells[i].tex
-    cell.unit = rosterEntry.unit; cell.key = key; cell._colLabel = cols[i].label
+    local key  = cols[i].key
+    local cell = row.cells[i]
+    local tex  = cell.tex
+
+    cell.unit = rosterEntry.unit
+    cell.key  = key
+    cell._colLabel = cols[i].label
 
     local res = results[rosterEntry.name]
     local present = res and res.present and res.present[key]
-    local isNA = (present == "__NA__")
+    local isNA    = (present == "__NA__")
     local missing = (not isNA) and (not present)
     cell._missing = missing
 
+    -- Presence base visual
     if isNA then
       tex:SetTexture(TEX_CHECK); tex:SetVertexColor(0.7, 0.7, 0.7, 0.35)
     elseif present then
@@ -238,17 +279,39 @@ local function UpdateRowVisual(row, rosterEntry, cols, results)
     end
 
     local canCast = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(key)
-    local clickable = canCast and missing
     cell._canCast = canCast
-    cell:EnableMouse(clickable)
-    if clickable then cell:RegisterForClicks("LeftButtonDown","RightButtonDown"); cell:SetAlpha(1.0)
-    else cell:RegisterForClicks(); cell:SetAlpha(0.6) end
+
+    -- Tooltip (includes out-of-range hint)
+    cell:SetScript("OnEnter", function()
+      if not cell.key then return end
+      GameTooltip:SetOwner(cell, "ANCHOR_RIGHT")
+      GameTooltip:SetText(cell._colLabel or "Buff")
+      if cell._canCast then
+        if cell._missing then
+          if cell._inRange and cell._visible then
+            GameTooltip:AddLine("Left-click: single buff", 0,1,0)
+            GameTooltip:AddLine("Right-click: group buff (if known)", 0,1,0)
+          else
+            GameTooltip:AddLine("Out of range.", 1,0.3,0.3)
+          end
+        else
+          GameTooltip:AddLine("Already present or N/A.", 0.8,0.8,0.8)
+        end
+      else
+        GameTooltip:AddLine("You cannot cast this buff.", 1,0.3,0.3)
+      end
+      GameTooltip:Show()
+    end)
+
+    -- Defer range-dependent interactivity to the live poller below,
+    -- but initialize once now so state is correct immediately:
+    UpdateCellRangeDecor(cell)
 
     i = i + 1
   end
 end
 
--- Ensure we have exactly `needed` row frames (no scrolling)
+-- Ensure we have exactly needed row frames (no scrolling)
 local function EnsureRowCount(parent, needed)
   UI.rows = UI.rows or {}
   local have = table.getn(UI.rows)
@@ -283,7 +346,6 @@ local function EnsureEmptyOverlay(parent)
   if UI.empty then return end
 
   local ov = CreateFrame("Frame", nil, parent)
-  -- Anchor to the same region rows start in (content top)
   ov:SetPoint("TOPLEFT", parent, "TOPLEFT", NAME_START_X, 0)
   ov:SetPoint("RIGHT",   parent, "RIGHT",  -PAD_RIGHT, 0)
   ov:SetHeight(EMPTY_TOTAL)
@@ -326,7 +388,7 @@ local function AnyMissingForOtherClasses(roster, results)
   local allCols = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
   local i=1
   while i <= table.getn(allCols) do
-    local col = allCols[i]
+    local col  = allCols[i]
     local mine = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)
     if not mine then
       local r=1
@@ -369,7 +431,31 @@ local function RebuildFilter(roster, results, visibleCols)
 end
 
 --===============================
--- Refresh pipeline
+-- Range-only repaint for visible cells (cheap, runs on OnUpdate)
+--===============================
+local function RefreshRangeForVisibleRows()
+  if not UI.rows or not UI.visibleCols then return end
+  local total = table.getn(UI.filteredIndex or {})
+  local numCols = table.getn(UI.visibleCols)
+  local i=1
+  while i <= total do
+    local row = UI.rows[i]
+    if row and row:IsShown() then
+      local c=1
+      while c <= numCols do
+        local cell = row.cells and row.cells[c]
+        if cell then
+          UpdateCellRangeDecor(cell)
+        end
+        c = c + 1
+      end
+    end
+    i = i + 1
+  end
+end
+
+--===============================
+-- Refresh pipeline (presence + sizing)
 --===============================
 local function RefreshGrid()
   if not UI.frame then return end
@@ -379,6 +465,7 @@ local function RefreshGrid()
   local results  = (FRT.CheckerCore and FRT.CheckerCore.GetResults()) or {}
 
   local cols = FilterColumnsForView(allCols)
+  UI.visibleCols = cols
 
   -- Build overlay once on the content area
   if UI.content and (not UI.empty or UI.empty:GetParent() ~= UI.content) then
@@ -407,8 +494,7 @@ local function RefreshGrid()
       local othersNeed = AnyMissingForOtherClasses(roster, results)
       if othersNeed then
         UI.empty.l2.tex:SetTexture(TEX_WARN)
-        UI.empty.l2.tex:SetWidth(20)
-        UI.empty.l2.tex:SetHeight(20)
+        UI.empty.l2.tex:SetWidth(20); UI.empty.l2.tex:SetHeight(20)
         UI.empty.l2.tex:SetVertexColor(1.0, 0.95, 0.2)
         UI.empty.l2.msg:SetText("Raid is missing buffs")
       else
@@ -421,7 +507,7 @@ local function RefreshGrid()
     end
   end
 
-  -- Paint rows
+  -- Paint rows (presence + base visuals)
   EnsureRowCount(UI.list, total)
   local i=1
   while i <= total do
@@ -433,12 +519,10 @@ local function RefreshGrid()
   -- === SIZING (expanded+empty uses "my columns" for width) ===
   local perCol = HEADER_COL_W + HEADER_COL_SP
 
-  -- Use the currently visible columns for width, EXCEPT when expanded AND empty:
   local widthCols = cols
   if (UI.expand and not hasRows) then
     widthCols = FilterMyColumns(allCols)  -- size like non-expanded mode
   end
-
   local visibleColCount = (widthCols and table.getn(widthCols)) or 0
   local w = PAD_LEFT + COL_START_X + (visibleColCount * perCol) + PAD_RIGHT
   if w < (PAD_LEFT + COL_START_X + PAD_RIGHT) then
@@ -456,10 +540,13 @@ local function RefreshGrid()
 
   UI.frame:SetHeight(padTop + listH + PAD_BOTTOM)
   UI.frame:SetWidth(w)
+
+  -- Do an immediate range pass so state is correct without waiting for the ticker
+  RefreshRangeForVisibleRows()
 end
 
 --===============================
--- Build UI ( +/- left of title; grows right & down )
+-- Build UI ( +/- left of title; grows right & down ) + range ticker
 --===============================
 local function BuildUI()
   if UI.frame then return end
@@ -477,7 +564,7 @@ local function BuildUI()
   end
 
   local f = CreateFrame("Frame", "FRT_CheckerFrame", UIParent)
-  -- Start centered; we’ll relock to TOPLEFT on first Show and after drags
+  -- Start centered; re-lock to TOPLEFT on first Show and after drags
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   f:SetWidth(400); f:SetHeight(200)
   f:SetFrameStrata("DIALOG")
@@ -576,20 +663,35 @@ local function BuildUI()
   -- Empty overlay anchored to content (left-aligned with Name column)
   EnsureEmptyOverlay(UI.content)
 
-  -- Live updates while visible
+  -- Live updates while visible + live range ticker
   f:SetScript("OnShow", function()
-    LockGrowthTopLeft(f) -- convert center anchor to top-left once visible
+    -- convert center anchor to top-left once visible so we grow right/down
+    local l, t = f:GetLeft(), f:GetTop()
+    if l and t then
+      f:ClearAllPoints()
+      f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+    end
     if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(true) end
+    UI._rangeAccum = 0
     RefreshGrid()
   end)
   f:SetScript("OnHide", function()
     if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(false) end
   end)
 
+  -- Throttled OnUpdate for range-only refresh
+  f:SetScript("OnUpdate", function(_, elapsed)
+    if not UI.frame or not UI.frame:IsShown() then return end
+    UI._rangeAccum = (UI._rangeAccum or 0) + (elapsed or 0)
+    if UI._rangeAccum >= RANGE_TICK_SEC then
+      UI._rangeAccum = 0
+      RefreshRangeForVisibleRows()
+    end
+  end)
+
   UI.frame = f
   UI.rows  = nil
 end
-
 
 --===============================
 -- Viewer public
