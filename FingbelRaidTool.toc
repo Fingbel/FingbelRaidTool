@@ -48,5 +48,3 @@ modules\checker\FRT_CheckerScan.lua
 
 
 demo\FRT_CasinoDemo.lua
-demo\utils\FRT_TestInlineRich.lua
-demo\FRT_FrameTest.lua
