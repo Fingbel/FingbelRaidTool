@@ -56,25 +56,23 @@ local function SetHeaderColumns(header, cols, roster, results)
   header.cols = {}
 
   local startX = 160
-  local colW = 22
+  local colW   = 22
   i=1
   while i <= table.getn(cols) do
     local h = CreateFrame("Frame", nil, header)
     h:SetWidth(colW); h:SetHeight(18)
     h:SetPoint("LEFT", header, "LEFT", startX + (i-1)*(colW+6), 0)
+
     local t = h:CreateTexture(nil, "ARTWORK"); t:SetAllPoints()
     t:SetTexture(cols[i].icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     h.tex = t
 
-    local txt = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    txt:SetPoint("TOP", h, "BOTTOM", 0, -1)
-    txt:SetText(cols[i].label)
     header.cols[i] = h
     i = i + 1
   end
 
-  -- Tooltip with missing count
+  -- Tooltip with missing count (kept)
   i=1
   while i <= table.getn(header.cols) do
     local col = cols[i]
@@ -283,13 +281,6 @@ local function RefreshGrid()
     UpdateRowVisual(UI.rows[i], rosterEntry, cols, results)
     i = i + 1
   end
-
-  if UI.frame.footer then
-    local names = {}
-    local j=1
-    while j <= table.getn(cols) do table.insert(names, cols[j].label) ; j = j + 1 end
-    UI.frame.footer:SetText("Columns: "..((table.getn(names) > 0) and table.concat(names, ", ") or "None"))
-  end
 end
 
 --===============================
@@ -318,6 +309,20 @@ local function BuildUI()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
+  -- Drag by title area
+  f:SetMovable(true)
+  f:EnableMouse(true)
+  local drag = CreateFrame("Frame", nil, f)
+  drag:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -8)
+  drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -8) -- leave room for close button
+  drag:SetHeight(28)
+  drag:EnableMouse(true)
+  drag:RegisterForDrag("LeftButton")
+  drag:SetScript("OnDragStart", function() f:StartMoving() end)
+  drag:SetScript("OnDragStop",  function() f:StopMovingOrSizing() end)
+  title:ClearAllPoints()
+  title:SetPoint("LEFT", drag, "LEFT", 8, 0)
+
   local only = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
   only:SetPoint("TOPRIGHT", f, "TOPRIGHT", -110, -12)
   only.text = only:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
@@ -344,29 +349,22 @@ local function BuildUI()
     FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshGrid)
   end)
 
-  local footer = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  footer:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 12)
-  footer:SetText("")
-  f.footer = footer
-
   -- hook core updates while visible
-    f:SetScript("OnShow", function()
-        if FRT.CheckerCore then
-            -- viewer visibility doesn't need to trigger a fresh scan here;
-            -- we already prime in Viewer.Show() below.
-            FRT.CheckerCore.SetLiveEvents(true)
-        end
-        RefreshGrid()
-    end)
+  f:SetScript("OnShow", function()
+    if FRT.CheckerCore then
+      FRT.CheckerCore.SetLiveEvents(true)
+    end
+    RefreshGrid()
+  end)
 
-    f:SetScript("OnHide", function()
-        if FRT.CheckerCore then
-            FRT.CheckerCore.SetLiveEvents(false)
-        end
-    end)
+  f:SetScript("OnHide", function()
+    if FRT.CheckerCore then
+      FRT.CheckerCore.SetLiveEvents(false)
+    end
+  end)
 
-    UI.frame = f
-    UI.rows = nil
+  UI.frame = f
+  UI.rows  = nil
 end
 
 --===============================
@@ -375,7 +373,7 @@ end
 FRT.CheckerViewer = {
   Show = function()
     BuildUI()
-    if FRT.CheckerCore then      
+    if FRT.CheckerCore then
       FRT.CheckerCore.SetLiveEvents(true)
       FRT.CheckerCore.RefreshNow()
     end
@@ -383,7 +381,6 @@ FRT.CheckerViewer = {
     RefreshGrid()
   end
 }
-
 
 -- Subscribe once so any core refresh pings the grid (if visible)
 if FRT.CheckerCore and FRT.CheckerCore.Subscribe then

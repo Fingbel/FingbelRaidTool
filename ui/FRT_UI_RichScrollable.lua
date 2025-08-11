@@ -1,8 +1,8 @@
--- FRT_Utils.lua
+-- FRT_Scrollable.lua
 FRT = FRT or {}
 FRT.Utils = FRT.Utils or {}
 
-function FRT.Utils.CreateScrollable(parent, opts)
+function FRT.Utils.CreateRichTextViewer(parent, opts)
   opts = opts or {}
   local DEFAULT_FONT = opts.fontObject or "GameFontNormal"
   local RIGHT_COL_W  = opts.rightColumnWidth or 18

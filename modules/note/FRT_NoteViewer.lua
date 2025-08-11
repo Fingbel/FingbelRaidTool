@@ -87,7 +87,7 @@ function Note.BuildViewer()
   area:SetPoint("BOTTOMRIGHT", -18, 18)
 
   -- Token-based scrollable renderer (dumb util)
-  ed = FRT.Utils.CreateScrollable(area, {
+  ed = FRT.Utils.CreateRichTextViewer(area, {
     name             = "FRT_ViewerScroll",
     rightColumnWidth = 18,
     insets           = { left=0, right=0, top=0, bottom=0 },

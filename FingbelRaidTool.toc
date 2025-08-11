@@ -9,14 +9,25 @@
 FingbelRaidTool.lua
 FRT_Data.lua
 
-utils\FRT_DebugDump.lua
-utils\FRT_SpecDetec.lua
-utils\FRT_TalentDump.lua
-utils\FRT_BuffDump.lua
-utils\FRT_Scrollable.lua
-utils\FRT_ScrollableEdit.lua
-utils\FRT_TestInlineRich.lua
-utils\FRT_GuildDump.lua
+dumpers\FRT_DebugDump.lua
+dumpers\FRT_SpecDump.lua
+dumpers\FRT_TalentDump.lua
+dumpers\FRT_BuffDump.lua
+dumpers\FRT_GuildDump.lua
+
+ui\FRT_UI_RichScrollable.lua.lua
+ui\FRT_ScrollableEdit.lua
+
+utils\FRT_Utils.lua
+utils\FRT_Class.lua
+utils\FRT_Group.lua
+utils\FRT_Auras.lua
+utils\FRT_Spellbook.lua
+utils\FRT_Casting.lua
+utils\FRT_Scheduler.lua
+utils\FRT_Bus.lua
+utils\FRT_Events.lua
+utils\FRT_DataNeed.lua
 
 subsystem\FRT_Parser.lua
 subsystem\FRT_NoteNet.lua
@@ -31,7 +42,11 @@ modules\note\FRT_NoteViewer.lua
 modules\checker\FRT_CheckerCore.lua
 modules\checker\FRT_CheckerEditorPane.lua
 modules\checker\FRT_CheckerViewer.lua
+modules\checker\FRT_CheckerRegistry.lua
+modules\checker\FRT_CheckerColumns.lua
+modules\checker\FRT_CheckerScan.lua
 
 
-FRT_CasinoDemo.lua
-FRT_FrameTest.lua
+demo\FRT_CasinoDemo.lua
+demo\utils\FRT_TestInlineRich.lua
+demo\FRT_FrameTest.lua
