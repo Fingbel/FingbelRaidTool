@@ -475,14 +475,14 @@ local function RefreshGrid()
     if UI.empty  then
       UI.empty.l1.tex:SetTexture(TEX_CHECK)
       UI.empty.l1.tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
-      UI.empty.l1.msg:SetText("Job done !")
+      UI.empty.l1.msg:SetText("Job done")
 
       local othersNeed = AnyMissingForOtherClasses(roster, results)
       if othersNeed then
         UI.empty.l2.tex:SetTexture(TEX_WARN)
         UI.empty.l2.tex:SetWidth(20); UI.empty.l2.tex:SetHeight(20)
         UI.empty.l2.tex:SetVertexColor(1.0, 0.95, 0.2)
-        UI.empty.l2.msg:SetText("Raid is missing buffs")
+        UI.empty.l2.msg:SetText("Missing buffs")
       else
         UI.empty.l2.tex:SetTexture(TEX_CHECK)
         UI.empty.l2.tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
