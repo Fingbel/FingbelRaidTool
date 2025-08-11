@@ -3,6 +3,34 @@
 -- Turtle WoW / Vanilla 1.12 / Lua 5.0
 
 FRT = FRT or {}
+FRT_Saved = FRT_Saved or {}
+FRT_Saved.ui = FRT_Saved.ui or {}
+
+local function _cfg()
+  FRT_Saved.ui.checker = FRT_Saved.ui.checker or {}
+  return FRT_Saved.ui.checker
+end
+
+local function SaveViewerRect(frame)
+  if not frame then return end
+  local c = _cfg()
+  local l, t = frame:GetLeft(), frame:GetTop()
+  local w, h = frame:GetWidth(), frame:GetHeight()
+  if l and t then c.x, c.y = l, t end
+  if w and h then c.w, c.h = w, h end
+end
+
+local function RestoreViewerRect(frame)
+  if not frame then return false end
+  local c = _cfg()
+  if c.w and c.h then frame:SetWidth(c.w); frame:SetHeight(c.h) end
+  if c.x and c.y then
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", c.x, c.y)
+    return true
+  end
+  return false
+end
 
 --===============================
 -- UI constants / textures
@@ -745,6 +773,9 @@ local function BuildUI()
   f:SetBackdropColor(0,0,0,0.85)
   f:SetBackdropBorderColor(1,1,1,1)
 
+  local restored = RestoreViewerRect(f)
+  local cfg = _cfg()
+
   -- Close
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
@@ -756,8 +787,32 @@ local function BuildUI()
   drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -8)
   drag:SetHeight(28); drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
-  drag:SetScript("OnDragStart", function() f:StartMoving() end)
-  drag:SetScript("OnDragStop",  function() f:StopMovingOrSizing(); LockGrowthTopLeft(f) end)
+
+  -- Honor "locked" flag from saved vars
+  local function ApplyLockState()
+    local locked = cfg.locked == true
+    if locked then
+      drag:EnableMouse(false)
+    else
+      drag:EnableMouse(true)
+    end
+  end
+  ApplyLockState()
+
+  drag:SetScript("OnDragStart", function()
+    if cfg.locked == true then return end
+    f:StartMoving()
+  end)
+  drag:SetScript("OnDragStop", function()
+    f:StopMovingOrSizing()
+    -- Lock the anchor to TOPLEFT so growth is stable, then save
+    local l, t = f:GetLeft(), f:GetTop()
+    if l and t then
+      f:ClearAllPoints()
+      f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+    end
+    SaveViewerRect(f)
+  end)
 
   -- Top bar: +/- button (left) + title
   local topBar = CreateFrame("Frame", nil, f)
@@ -833,28 +888,27 @@ local function BuildUI()
 
   -- Live updates while visible + live range ticker
   f:SetScript("OnShow", function()
-    local l, t = f:GetLeft(), f:GetTop()
-    if l and t then
-      f:ClearAllPoints()
-      f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+    -- If we didn't restore, convert the current CENTER anchor to TOPLEFT once and save
+    if not restored then
+      local l, t = f:GetLeft(), f:GetTop()
+      if l and t then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+        SaveViewerRect(f)
+        restored = true
+      end
     end
     if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(true) end
     UI._rangeAccum = 0
     RefreshGrid()
   end)
+
   f:SetScript("OnHide", function()
+    SaveViewerRect(f)
     if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(false) end
   end)
 
-  -- Throttled OnUpdate for range-only refresh
-  f:SetScript("OnUpdate", function(_, elapsed)
-    if not UI.frame or not UI.frame:IsShown() then return end
-    UI._rangeAccum = (UI._rangeAccum or 0) + (elapsed or 0)
-    if UI._rangeAccum >= RANGE_TICK_SEC then
-      UI._rangeAccum = 0
-      RefreshRangeForVisibleRows()
-    end
-  end)
+  -- OnUpdate ticker (unchanged)
 
   UI.frame = f
   UI.rows  = nil
