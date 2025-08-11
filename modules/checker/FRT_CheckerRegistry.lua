@@ -1,5 +1,5 @@
 -- FRT_CheckerRegistry.lua
--- Adapt FRT.Data.Buffs into runtime defs + icon lookup
+-- Adapt FRT.Data.Buffs into runtime defs + icon lookup (+ optional name hints)
 
 FRT = FRT or {}
 FRT.CheckerRegistry = FRT.CheckerRegistry or {}
@@ -10,6 +10,7 @@ do
   local byKey = {}
   local orderIndex = {}
   local spellIcons = {}
+  local spellNames = {}  -- NEW
 
   local function buildOnce()
     if defs then return end
@@ -59,8 +60,11 @@ do
         table.insert(defs, def)
         byKey[k] = def
 
-        -- spell icons may live inline or in D.SpellIcons fallback
+        -- icons can be inline or in D.SpellIcons
         spellIcons[k] = (b.spellIcons) or ((D.SpellIcons and D.SpellIcons[k]) or nil)
+
+        -- NEW: optional name hints can be inline or in D.SpellNames
+        spellNames[k] = (b.spellNames) or ((D.SpellNames and D.SpellNames[k]) or nil)
       end
       i=i+1
     end
@@ -79,6 +83,12 @@ do
   function FRT.CheckerRegistry.GetSpellIcons(key)
     buildOnce()
     return spellIcons[key]
+  end
+
+  -- NEW: expose optional name hints (e.g., { single={"Mark of the Wild"}, group={"Gift of the Wild"} })
+  function FRT.CheckerRegistry.GetSpellNames(key)
+    buildOnce()
+    return spellNames[key]
   end
 
   function FRT.CheckerRegistry.PlayerCanProvide(key)

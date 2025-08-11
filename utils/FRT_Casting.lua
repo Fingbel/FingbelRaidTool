@@ -110,7 +110,7 @@ do
     return FRT.Cast.SafeCastOnUnit(idx, unit)
   end
 
-  -- NEW: cast by icons, but gate range using a probe icon list (eg SINGLE)
+  -- cast by icons, but gate range using a probe icon list (eg SINGLE)
   function FRT.Cast.ByIconsWithProbe(iconListToCast, unit, probeIconList)
     local castIdx = FRT.Spellbook and FRT.Spellbook.FindByIcons(iconListToCast)
     if not castIdx then return false end
@@ -119,5 +119,12 @@ do
       probeIdx = FRT.Spellbook and FRT.Spellbook.FindByIcons(probeIconList) or nil
     end
     return FRT.Cast.SafeCastOnUnit(castIdx, unit, probeIdx)
+  end
+
+  -- Resolve by icons with optional name fallback, then safe-cast
+  function FRT.Cast.BySignature(iconList, nameList, unit)
+    local idx = FRT.Spellbook and FRT.Spellbook.Resolve and FRT.Spellbook.Resolve(iconList, nameList)
+    if not idx then return false end
+    return FRT.Cast.SafeCastOnUnit(idx, unit)
   end
 end

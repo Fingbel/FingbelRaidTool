@@ -45,7 +45,7 @@ do
   end
 
   -- Click-to-buff entry used by Viewer
-  function FRT.CheckerCore.TryCast(key, unit, useGroup)
+    function FRT.CheckerCore.TryCast(key, unit, useGroup)
     if not key or not unit then return false end
     if not FRT.CheckerRegistry.PlayerCanProvide(key) then return false end
     if UnitIsDeadOrGhost(unit) then return false end
@@ -54,17 +54,20 @@ do
     local icons = FRT.CheckerRegistry.GetSpellIcons(key)
     if not icons then return false end
 
+    local names = (FRT.CheckerRegistry.GetSpellNames and FRT.CheckerRegistry.GetSpellNames(key)) or nil
+
     local ok = false
     if useGroup and icons.group then
-      -- Probe with SINGLE (more reliable range API), cast GROUP
-      local probe = icons.single or icons.group
-      ok = FRT.Cast.ByIconsWithProbe(icons.group, unit, probe)
+      ok = FRT.Cast.BySignature(icons.group, names and names.group, unit)
       if not ok and icons.single then
-        -- optional fallback if group failed for other reasons
-        ok = FRT.Cast.ByIcons(icons.single, unit)
+        ok = FRT.Cast.BySignature(icons.single, names and names.single, unit)
       end
     else
-      if icons.single then ok = FRT.Cast.ByIcons(icons.single, unit) end
+      if icons.single then
+        ok = FRT.Cast.BySignature(icons.single, names and names.single, unit)
+      elseif icons.group then
+        ok = FRT.Cast.BySignature(icons.group, names and names.group, unit)
+      end
     end
     return ok and true or false
   end

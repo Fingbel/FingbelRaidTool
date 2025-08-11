@@ -118,6 +118,10 @@ D.Buffs = {
       single = { "Spell_Nature_Regeneration" },
       group  = { "Spell_Nature_GiftoftheWild" },
     },
+    spellNames = {
+    single = { "Mark of the Wild" },
+    group  = { "Gift of the Wild" },
+  },
   },
 
   -- thorns = {
