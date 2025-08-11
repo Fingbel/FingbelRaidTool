@@ -10,13 +10,13 @@ FRT = FRT or {}
 local ROW_HEIGHT   = 18
 local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
-local TEX_WARN    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+local TEX_WARN    =  "Interface\\GossipFrame\\AvailableQuestIcon"
 
 -- Layout (tight)
 local HEADER_TOP_OFFSET = 38
 local HEADER_HEIGHT     = 24
 local PAD_LEFT          = 4
-local PAD_RIGHT         = 4
+local PAD_RIGHT         = 8
 local PAD_BELOW_HEADER  = 0
 local PAD_BOTTOM        = 4
 
@@ -368,18 +368,6 @@ local function RebuildFilter(roster, results, visibleCols)
   end
 end
 
-local function LockGrowthTopLeft(frame)
-  if not frame or frame._growthLockedTemp then return end
-  local l, t = frame:GetLeft(), frame:GetTop()
-  if l and t then
-    frame._growthLockedTemp = true         -- guard against re-entrancy
-    frame:ClearAllPoints()
-    -- Place the frame's TOPLEFT at the exact screen coords we captured
-    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
-    frame._growthLockedTemp = nil
-  end
-end
-
 --===============================
 -- Refresh pipeline
 --===============================
@@ -418,8 +406,10 @@ local function RefreshGrid()
 
       local othersNeed = AnyMissingForOtherClasses(roster, results)
       if othersNeed then
-        UI.empty.l2.tex:SetTexture(TEX_CROSS)
-        UI.empty.l2.tex:SetVertexColor(1.0, 0.2, 0.2, 1.0)
+        UI.empty.l2.tex:SetTexture(TEX_WARN)
+        UI.empty.l2.tex:SetWidth(20)
+        UI.empty.l2.tex:SetHeight(20)
+        UI.empty.l2.tex:SetVertexColor(1.0, 0.95, 0.2)
         UI.empty.l2.msg:SetText("Raid is missing buffs")
       else
         UI.empty.l2.tex:SetTexture(TEX_CHECK)
