@@ -1,4 +1,4 @@
--- Fingbel Raid Tool - Checker Core (Basic Grid + Live Updates + Heartbeat) - Vanilla 1.12 / Lua 5.0
+-- Fingbel Raid Tool - Checker Core (Basic Grid + Auto-Refresh) 
 
 FRT = FRT or {}
 
@@ -50,7 +50,6 @@ local UI = {
   frame=nil, header=nil, scroll=nil, rows=nil,
   onlyMissing=false, activeCols={}, roster={}, results={}, filteredIndex={},
   evt=nil, ticker=nil, nextRefreshAt=nil,
-  pulse=nil, pulseAccum=0, sig={}, -- heartbeat + per-unit signatures
 }
 
 --===============================
@@ -94,41 +93,58 @@ local CLASS_ORDER = {
 local function BuildRoster()
   local roster = {}
   local nRaid = GetNumRaidMembers and GetNumRaidMembers() or 0
+
   if nRaid > 0 then
     local i
-    for i=1, nRaid do
-      local name, rank, subgroup, level, class, fileName = GetRaidRosterInfo(i)
-      if name then
+    for i = 1, nRaid do
+      -- Vanilla returns (name, rank, subgroup, level, class, fileName, zone, online, isDead, role, isML)
+      local name, rank, subgroup, level, class, fileName, zone, online = GetRaidRosterInfo(i)
+      local unit = "raid"..i
+      -- Require both the raid API flag and the unit connection (belt + suspenders)
+      local connected = (UnitIsConnected and UnitIsConnected(unit)) and true or false
+      if name and online and connected then
         table.insert(roster, {
-          name=name, unit="raid"..i,
-          class=(fileName or class or "UNKNOWN"),
-          subgroup=(subgroup or 9)
+          name = name,
+          unit = unit,
+          class = (fileName or class or "UNKNOWN"),
+          subgroup = (subgroup or 9),
         })
       end
     end
   else
+    -- Solo/party
     local pName = UnitName("player") or "player"
+    if not (UnitIsConnected and UnitIsConnected("player")) then
+      -- player "offline" edge-case in some UIs; just return empty roster
+      return roster
+    end
     local ploc, pfile = UnitClass("player")
-    table.insert(roster, { name=pName, unit="player", class=(pfile or ploc or "UNKNOWN"), subgroup=1 })
+    table.insert(roster, { name = pName, unit = "player", class = (pfile or ploc or "UNKNOWN"), subgroup = 1 })
+
     local nParty = GetNumPartyMembers and GetNumPartyMembers() or 0
     local i
-    for i=1, nParty do
+    for i = 1, nParty do
       local u = "party"..i
-      local nm = UnitName(u) or u
-      local loc, file = UnitClass(u)
-      table.insert(roster, { name=nm, unit=u, class=(file or loc or "UNKNOWN"), subgroup=1 })
+      if (UnitIsConnected and UnitIsConnected(u)) then
+        local nm = UnitName(u) or u
+        local loc, file = UnitClass(u)
+        table.insert(roster, { name = nm, unit = u, class = (file or loc or "UNKNOWN"), subgroup = 1 })
+      end
     end
   end
 
-  table.sort(roster, function(a,b)
+  table.sort(roster, function(a, b)
     if a.subgroup ~= b.subgroup then return (a.subgroup or 9) < (b.subgroup or 9) end
+    local CLASS_ORDER = { WARRIOR=1, PRIEST=2, DRUID=3, MAGE=4, ROGUE=5, HUNTER=6, WARLOCK=7, PALADIN=8, SHAMAN=9 }
     local ca = CLASS_ORDER[a.class or "UNKNOWN"] or 99
     local cb = CLASS_ORDER[b.class or "UNKNOWN"] or 99
     if ca ~= cb then return ca < cb end
     return (a.name or "") < (b.name or "")
   end)
+
   return roster
 end
+
 
 local function DetectProviders(roster)
   local providers = {}
@@ -180,23 +196,6 @@ local function Scan(roster, cols)
     results[name] = { present=present, missing=missing }
   end
   return results
-end
-
--- Build a compact signature string for a unit over current columns (e.g. "1,1,0" or "2,1,1")
-local function BuildUnitSig(unit, cols)
-  local seen = CollectBuffTextures(unit)
-  local arr = {}
-  local i
-  for i=1, table.getn(cols) do
-    local def = REG[cols[i].key]
-    if def.needFn(unit) then
-      local ok = HasAnyTextureMatch(seen, def.tex)
-      if ok then table.insert(arr, "1") else table.insert(arr, "0") end
-    else
-      table.insert(arr, "2") -- N/A
-    end
-  end
-  return table.concat(arr, ",")
 end
 
 --===============================
@@ -335,34 +334,9 @@ local function RefreshDataAndGrid()
   UI.activeCols = BuildActiveColumns(UI.roster)
   UI.results = Scan(UI.roster, UI.activeCols)
 
-  -- rebuild signature cache from results (so heartbeat starts consistent)
-  UI.sig = {}
-  local i
-  for i=1, table.getn(UI.roster) do
-    local name = UI.roster[i].name
-    local unit = UI.roster[i].unit
-    -- derive sig from current results to avoid immediate false "change"
-    local res = UI.results[name]
-    if res then
-      local arr = {}
-      local c
-      for c=1, table.getn(UI.activeCols) do
-        local key = UI.activeCols[c].key
-        local v = res.present[key]
-        if v == "__NA__" then
-          table.insert(arr,"2")
-        elseif v then
-          table.insert(arr,"1")
-        else
-          table.insert(arr,"0")
-        end
-      end
-      UI.sig[name] = table.concat(arr, ",")
-    end
-  end
-
   -- filter mapping
   UI.filteredIndex = {}
+  local i
   for i=1, table.getn(UI.roster) do
     local name = UI.roster[i].name
     local res = UI.results[name]
@@ -397,7 +371,7 @@ local function RefreshDataAndGrid()
 end
 
 --===============================
--- Live update support (events + debounce + heartbeat)
+-- Live updates (events + simple 1s timer)
 --===============================
 local function IsGroupUnit(u)
   if not u then return false end
@@ -406,6 +380,7 @@ local function IsGroupUnit(u)
   return (u == "player") or (p4 == "raid") or (p5 == "party")
 end
 
+-- optional: quick refresh on known events (debounced)
 local function RequestRefreshSoon(delay)
   if not UI.frame or not UI.frame:IsShown() then return end
   if not delay then delay = 0.20 end
@@ -424,15 +399,14 @@ local function RegisterLiveEvents(enable)
   if not UI.evt then
     UI.evt = CreateFrame("Frame")
     UI.evt:SetScript("OnEvent", function()
-      -- 1.12 uses globals: event, arg1...
       if event == "UNIT_AURA" then
-        if IsGroupUnit(arg1) then RequestRefreshSoon(0.15) end
+        if IsGroupUnit(arg1) then RequestRefreshSoon(0.10) end
       elseif event == "PLAYER_AURAS_CHANGED" then
-        RequestRefreshSoon(0.15)
+        RequestRefreshSoon(0.10)
       elseif event == "RAID_ROSTER_UPDATE" or event == "PARTY_MEMBERS_CHANGED" then
         RequestRefreshSoon(0.05)
       elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
-        RequestRefreshSoon(0.20)
+        RequestRefreshSoon(0.25)
       end
     end)
   end
@@ -451,43 +425,6 @@ local function RegisterLiveEvents(enable)
     UI.evt:UnregisterEvent("PLAYER_ENTERING_WORLD")
     UI.evt:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
   end
-end
-
--- Heartbeat: poll every 0.5s and refresh only if signatures changed
-local function EnsureHeartbeat(enable)
-  if not UI.pulse then
-    UI.pulse = CreateFrame("Frame")
-    UI.pulseAccum = 0
-    UI.pulse:SetScript("OnUpdate", function()
-      if not UI.frame or not UI.frame:IsShown() then return end
-      local now = GetTime()
-      -- accumulate elapsed from globals not provided, so approximate with next refresh
-      UI.pulseAccum = UI.pulseAccum + 0.05  -- cheap fixed step; 1.12 OnUpdate lacks elapsed param
-      if UI.pulseAccum < 0.50 then return end
-      UI.pulseAccum = 0
-
-      if table.getn(UI.roster) == 0 or table.getn(UI.activeCols) == 0 then
-        -- if nothing is built (e.g., immediately after show), do a full refresh
-        RefreshDataAndGrid()
-        return
-      end
-
-      local changed = false
-      local i
-      for i=1, table.getn(UI.roster) do
-        local name = UI.roster[i].name
-        local unit = UI.roster[i].unit
-        local sig = BuildUnitSig(unit, UI.activeCols)
-        if UI.sig[name] ~= sig then
-          UI.sig[name] = sig
-          changed = true
-        end
-      end
-      if changed then RefreshDataAndGrid() end
-    end)
-  end
-  UI.pulse:Show()
-  if not enable then UI.pulse:Hide() end
 end
 
 --===============================
@@ -527,8 +464,8 @@ local function BuildUI()
   only.text = only:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
   only.text:SetPoint("LEFT", only, "RIGHT", 2, 0)
   only.text:SetText("Only Missing")
-  only:SetScript("OnClick", function(self)
-    UI.onlyMissing = self:GetChecked() and true or false
+  only:SetScript("OnClick", function()
+    UI.onlyMissing = (only:GetChecked() and true or false)  -- 1 or nil → boolean
     RefreshDataAndGrid()
   end)
 
@@ -544,37 +481,33 @@ local function BuildUI()
   child:SetWidth(1); child:SetHeight(ROW_HEIGHT * VISIBLE_ROWS)
   f.scrollChild = child
 
-  scroll:SetScript("OnVerticalScroll", function(self, offset)
-    FauxScrollFrame_OnVerticalScroll(self, offset, ROW_HEIGHT, RefreshDataAndGrid)
-  end)
+  scroll:SetScript("OnVerticalScroll", function()
+  FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshDataAndGrid)
+end)
 
   local footer = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 12)
   footer:SetText("")
   f.footer = footer
 
-  -- Live updates only while visible (events + heartbeat)
+  -- Live: events + 1s auto-refresh while visible
+  f._accum = 0
   f:SetScript("OnShow", function()
     RegisterLiveEvents(true)
-    EnsureHeartbeat(true)
-    UI.pulseAccum = 0
-    -- build once immediately
+    f._accum = 1.0 -- force immediate refresh on show
     RefreshDataAndGrid()
   end)
-  -- Auto-refresh every 1.0s while shown (1.12: elapsed is in arg1)
-  f._accum = 0
+  f:SetScript("OnHide", function()
+    RegisterLiveEvents(false)
+  end)
   f:SetScript("OnUpdate", function()
     if not f:IsShown() then return end
     local dt = arg1 or 0
     f._accum = (f._accum or 0) + dt
-    if f._accum >= 0.5 then
+    if f._accum >= 1.0 then
       f._accum = 0
       RefreshDataAndGrid()
     end
-  end)
-  f:SetScript("OnHide", function()
-    RegisterLiveEvents(false)
-    EnsureHeartbeat(false)
   end)
 
   UI.frame = f
@@ -591,7 +524,7 @@ function Checker.ShowUI()
 end
 
 --===============================
--- Slash handling (integrated with /frt dispatcher)
+-- Slash handling
 --===============================
 function Checker.OnSlash(module, cmd, rest)
   if cmd ~= "check" then return false end
@@ -628,7 +561,7 @@ end
 -- Lifecycle
 --===============================
 function Checker.OnLoad(module)
-  if FRT and FRT.Print then FRT.Print("Checker loaded (live updates + heartbeat).") end
+  if FRT and FRT.Print then FRT.Print("Checker loaded (auto-refresh).") end
 end
 
 --===============================
