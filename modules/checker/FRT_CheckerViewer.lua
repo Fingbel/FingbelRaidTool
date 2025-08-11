@@ -73,23 +73,6 @@ local function FilterColumnsForView(allCols)
   return FilterMyColumns(allCols)
 end
 
-local function IsVisiblyReachable(unit)
-  if not unit then return false end
-  if UnitIsConnected and UnitIsConnected(unit) == 0 then return false end
-  if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return false end
-  if UnitIsVisible and not UnitIsVisible(unit) then return false end
-  return true
-end
-
--- Prefer single-spell range checks; group buffs often give nil with IsSpellInRange
-local function IsAnyBuffInRange(key, unit)
-  if not (FRT.Cast and FRT.Cast.InRangeByKey) then return true end -- fail-open if casting module missing
-  local singleOK = FRT.Cast.InRangeByKey(key, unit, false)
-  if singleOK then return true end
-  local groupOK  = FRT.Cast.InRangeByKey(key, unit, true)
-  return groupOK and true or false
-end
-
 --===============================
 -- Header + rows
 --===============================
@@ -225,8 +208,8 @@ local function UpdateCellRangeDecor(cell)
     return
   end
 
-  local inRange = IsAnyBuffInRange(cell.key, cell.unit)
-  local visible = IsVisiblyReachable(cell.unit)
+  local inRange = FRT.Cast.InRangeByKey(cell.key, cell.unit)
+  local visible = FRT.Cast.IsVisiblyReachable(cell.unit)
 
   cell._inRange = inRange
   cell._visible = visible

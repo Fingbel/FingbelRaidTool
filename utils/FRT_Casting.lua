@@ -10,23 +10,6 @@ do
   ------------------------------------------------------------
   -- Utilities
   ------------------------------------------------------------
-  local function _IsInRangeByIndex(spellIndex, unit)
-    if not spellIndex or not unit then return false end
-    local name = GetSpellName(spellIndex, BOOKTYPE_SPELL)
-    if not name then return false end
-    local r = IsSpellInRange(name, unit)
-    return r == 1
-  end
-
-  -- FRT_Casting.lua (add near top)
-  local function _IsVisiblyReachable(unit)
-    if not unit then return false end
-    if UnitIsConnected and UnitIsConnected(unit) == 0 then return false end
-    if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return false end
-    if UnitIsVisible and not UnitIsVisible(unit) then return false end
-    return true
-  end
-
 
   -- Temporarily force CVar to avoid auto self-cast fallback
   local function _withAutoSelfCastDisabled(fn)
@@ -44,16 +27,33 @@ do
   function FRT.Cast.InRangeByIcons(iconList, unit)
     local idx = FRT.Spellbook and FRT.Spellbook.FindByIcons(iconList)
     if not idx then return false end
-    return _IsInRangeByIndex(idx, unit)
+    return FRT.Cast.IsInRangeByIndex(idx, unit)
   end
 
-  function FRT.Cast.InRangeByKey(key, unit, useGroup)
+  function FRT.Cast.InRangeByKey(key, unit)
     local icons = FRT.CheckerRegistry and FRT.CheckerRegistry.GetSpellIcons(key)
     if not icons then return false end
-    local list = (useGroup and icons.group) or icons.single or icons.group
+    local list = icons.single 
     if not list then return false end
     return FRT.Cast.InRangeByIcons(list, unit)
   end
+
+  function FRT.Cast.IsInRangeByIndex(spellIndex, unit)
+    if not spellIndex or not unit then return false end
+    local name = GetSpellName(spellIndex, BOOKTYPE_SPELL)
+    if not name then return false end
+    local r = IsSpellInRange(name, unit)
+    return r == 1
+  end
+
+  function FRT.Cast.IsVisiblyReachable(unit)
+    if not unit then return false end
+    if UnitIsConnected and UnitIsConnected(unit) == 0 then return false end
+    if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return false end
+    if UnitIsVisible and not UnitIsVisible(unit) then return false end
+    return true
+  end
+
 
   ------------------------------------------------------------
   -- Core: safe cast that never falls back to self
@@ -65,14 +65,14 @@ do
     if UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then return false end
     if UnitIsFriend and not UnitIsFriend("player", unit) then return false end
 
-    if not _IsVisiblyReachable(unit) then
+    if not FRT.Cast.IsVisiblyReachable(unit) then
       if FRT and FRT.Print then FRT.Print("|cffffcc00Target too far (not visible).|r") end
       if SpellIsTargeting and SpellIsTargeting() then SpellStopTargeting() end
       return false
     end
 
     -- Hard RANGE GATE: refuse before we touch target, also stops any click-casting mode
-    if not _IsInRangeByIndex(spellIndex, unit) then
+    if not FRT.Cast.IsInRangeByIndex(spellIndex, unit) then
       if SpellIsTargeting and SpellIsTargeting() then SpellStopTargeting() end
       if FRT and FRT.Print then FRT.Print("|cffffcc00Out of range.|r") end
       return false
