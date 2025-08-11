@@ -7,6 +7,7 @@
 
 
 FingbelRaidTool.lua
+FRT_Data.lua
 
 utils\FRT_DebugDump.lua
 utils\FRT_SpecDetec.lua
@@ -29,6 +30,7 @@ modules\note\FRT_NoteViewer.lua
 
 modules\checker\FRT_CheckerCore.lua
 modules\checker\FRT_CheckerEditorPane.lua
+modules\checker\FRT_CheckerViewer.lua
 
 
 FRT_CasinoDemo.lua

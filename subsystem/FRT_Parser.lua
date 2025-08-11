@@ -7,46 +7,16 @@ FRT.Note.Parser = FRT.Note.Parser or {}
 do
   local Parser = FRT.Note.Parser
 
-  -- Raid targets
-  local RT_TEXCOORD = {
-    [1]={0.00,0.25,0.00,0.25}, [2]={0.25,0.50,0.00,0.25},
-    [3]={0.50,0.75,0.00,0.25}, [4]={0.75,1.00,0.00,0.25},
-    [5]={0.00,0.25,0.25,0.50}, [6]={0.25,0.50,0.25,0.50},
-    [7]={0.50,0.75,0.25,0.50}, [8]={0.75,1.00,0.25,0.50},
-  }
-  local RT_TEXTURE = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+  local D = FRT.Data or {}
+  local RT_TEXTURE   = D.RaidTargets and D.RaidTargets.TEXTURE or "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+  local RT_TEXCOORD  = D.RaidTargets and D.RaidTargets.COORDS   or {}
+  local CLASS_TEX    = D.ClassIcons and D.ClassIcons.TEXTURE    or "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+  local CLASS_TEXCOORD = D.ClassIcons and D.ClassIcons.COORDS   or {}
+  local CLASS_HEX    = D.ClassColorsHex or {}
 
-  -- Class icons (character creation sheet)
-  local CLASS_TEX = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
-  local CLASS_TEXCOORD = {
-    WARRIOR = {0.00,0.25,0.00,0.25},
-    MAGE    = {0.25,0.50,0.00,0.25},
-    ROGUE   = {0.50,0.75,0.00,0.25},
-    DRUID   = {0.75,1.00,0.00,0.25},
-
-    HUNTER  = {0.00,0.25,0.25,0.50},
-    SHAMAN  = {0.25,0.50,0.25,0.50},
-    PRIEST  = {0.50,0.75,0.25,0.50},
-    WARLOCK = {0.75,1.00,0.25,0.50},
-
-    PALADIN = {0.00,0.25,0.50,0.75},
-  }
-
-  -- Class colors (hex)
-  local CLASS_HEX = {
-    WARRIOR = "C79C6E", MAGE = "69CCF0", ROGUE = "FFF569",
-    DRUID   = "FF7D0A", HUNTER = "ABD473", SHAMAN = "0070DE",
-    PRIEST  = "FFFFFF", WARLOCK = "9482C9", PALADIN = "F58CBA",
-  }
-
-  -- helpers
-  local function hex2rgb(hex)
-    if not hex or string.len(hex) ~= 6 then return nil end
-    local r = tonumber(string.sub(hex,1,2),16) or 255
-    local g = tonumber(string.sub(hex,3,4),16) or 255
-    local b = tonumber(string.sub(hex,5,6),16) or 255
-    return { r/255, g/255, b/255 }
-  end
+local function hex2rgb(hex)
+  return (D.HexToRGB and D.HexToRGB(hex)) or {1,1,1}
+end
 
   local function pushText(tokens, text, color, font)
     if not text or text == "" then return end

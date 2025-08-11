@@ -1,64 +1,166 @@
--- Fingbel Raid Tool - Checker Core (Basic Grid + Auto-Refresh) 
+-- Fingbel Raid Tool - Checker Core (Grid + Auto-Refresh + Click-to-Buff)
+-- Uses FRT_Data (pure data) with need-tokens + per-buff spellIcons
+-- Turtle WoW / Vanilla 1.12 / Lua 5.0
 
 FRT = FRT or {}
+local BOOKTYPE_SPELL = BOOKTYPE_SPELL or "spell"
 
+-- ===============================
+-- UI constants
+-- ===============================
+local MAX_BUFFS    = 16
+local ROW_HEIGHT   = 18
+local VISIBLE_ROWS = 12
+local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
+local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+
+-- ===============================
+-- Shared data (from FRT_Data)
+-- ===============================
+local D = FRT.Data or {}
+
+-- Preferred column order; if missing, derive from D.Buffs keys (unsorted)
+local ORDERED_KEYS = (D.BuffOrder and table.getn(D.BuffOrder) > 0 and D.BuffOrder) or {}
+if table.getn(ORDERED_KEYS) == 0 and D.Buffs then
+  local k,_ ; for k,_ in pairs(D.Buffs) do table.insert(ORDERED_KEYS, k) end
+end
+
+-- ===============================
+-- Build REG + SPELL_ICON from FRT_Data
+-- - REG: runtime defs including resolved needFn
+-- - SPELL_ICON: locale-proof substrings for casting
+-- ===============================
+local NEEDERS = {
+  always = function(unit) return true end,
+  mana   = function(unit) local pt = UnitPowerType and UnitPowerType(unit) or 0; return (pt == 0) end,
+  -- extend with more tokens if needed (melee, ranged, healer, etc.)
+}
+
+local REG, SPELL_ICON = {}, {}
+do
+  local base = D.Buffs or {}
+  -- 1) Add ordered keys first (so BuildActiveColumns respects the order)
+  local i
+  for i = 1, table.getn(ORDERED_KEYS) do
+    local k = ORDERED_KEYS[i]
+    local b = base[k]
+    if b then
+      REG[k] = {
+        key        = k,
+        label      = b.label or k,
+        providers  = b.providers or {},
+        tex        = b.texSubstrings or {},
+        headerIcon = b.headerIcon or "Interface\\Icons\\INV_Misc_QuestionMark",
+        needFn     = NEEDERS[b.need or "always"] or NEEDERS.always,
+      }
+      SPELL_ICON[k] = b.spellIcons -- may be nil; click-to-buff will auto-disable
+    end
+  end
+  -- 2) Include any remaining buffs not in BuffOrder
+  local k2,b2
+  for k2,b2 in pairs(base) do
+    if not REG[k2] then
+      REG[k2] = {
+        key        = k2,
+        label      = b2.label or k2,
+        providers  = b2.providers or {},
+        tex        = b2.texSubstrings or {},
+        headerIcon = b2.headerIcon or "Interface\\Icons\\INV_Misc_QuestionMark",
+        needFn     = NEEDERS[b2.need or "always"] or NEEDERS.always,
+      }
+      SPELL_ICON[k2] = b2.spellIcons
+      table.insert(ORDERED_KEYS, k2)
+    end
+  end
+end
+
+-- ===============================
+-- Module
+-- ===============================
 local Checker = {}
 Checker.name = "Checker"
 
---===============================
--- Buff registry (texture substrings)
---===============================
-local REG = {
-  fort = {
-    key="fort", label="Fortitude",
-    providers = { PRIEST=true },
-    needFn = function(unit) return true end,
-    tex = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_WordFortitude",
-  },
-  motw = {
-    key="motw", label="Mark of the Wild",
-    providers = { DRUID=true },
-    needFn = function(unit) return true end,
-    tex = { "Spell_Nature_Regeneration", "Spell_Nature_GiftoftheWild" },
-    headerIcon = "Interface\\Icons\\Spell_Nature_Regeneration",
-  },
-  ai = {
-    key="ai", label="Arcane Intellect",
-    providers = { MAGE=true },
-    needFn = function(unit)
-      local pt = UnitPowerType and UnitPowerType(unit) or 0
-      return (pt == 0) -- mana users
-    end,
-    tex = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_MagicalSentry",
-  },
-}
-local ORDERED_KEYS = { "fort", "motw", "ai" }
-local MAX_BUFFS = 16
-local ROW_HEIGHT = 18
-local VISIBLE_ROWS = 12
+-- ===============================
+-- Spellbook lookup + casting
+-- ===============================
+local function FindSpellIndexByIcon(substrList)
+  if not substrList then return nil end
+  local numTabs = GetNumSpellTabs and GetNumSpellTabs() or 0
+  local best = nil
+  local t
+  for t = 1, numTabs do
+    local tabName, tabTex, offset, numSpells = GetSpellTabInfo(t)
+    offset = offset or 0; numSpells = numSpells or 0
+    local i
+    for i = 1, numSpells do
+      local idx = offset + i
+      local tex = GetSpellTexture and GetSpellTexture(idx, BOOKTYPE_SPELL) or nil
+      if tex then
+        local s
+        for s = 1, table.getn(substrList) do
+          if string.find(tex, substrList[s], 1, true) then
+            best = idx -- keep highest rank encountered
+          end
+        end
+      end
+    end
+  end
+  return best
+end
 
--- UI textures (1.12-safe)
-local TEX_CHECK = "Interface\\Buttons\\UI-CheckBox-Check"
-local TEX_CROSS = "Interface\\Buttons\\UI-GroupLoot-Pass-Up" -- red-ish X
+-- Cast on the specific unit by temporarily targeting them, then restore
+local function TryCastByIcon(iconList, unit)
+  if not iconList or not unit then return false end
+  local idx = FindSpellIndexByIcon(iconList)
+  if not idx then return false end
 
---===============================
+  if SpellIsTargeting and SpellIsTargeting() then SpellStopTargeting() end
+
+  local had  = UnitExists("target")
+  local same = had and UnitIsUnit and UnitIsUnit("target", unit)
+
+  if not same then TargetUnit(unit) end
+  CastSpell(idx, BOOKTYPE_SPELL)
+
+  if SpellIsTargeting and SpellIsTargeting() then
+    SpellTargetUnit(unit)
+    if SpellIsTargeting() then SpellStopTargeting() end
+  end
+
+  if not same then
+    if had then TargetLastTarget() else ClearTarget() end
+  end
+
+  return true
+end
+
+-- ===============================
 -- Runtime state
---===============================
+-- ===============================
 local UI = {
   frame=nil, header=nil, scroll=nil, rows=nil,
   onlyMissing=false, activeCols={}, roster={}, results={}, filteredIndex={},
   evt=nil, ticker=nil, nextRefreshAt=nil,
 }
 
---===============================
+-- ===============================
 -- Helpers (1.12-safe)
---===============================
+-- ===============================
 local function ClassColorRGB(class)
   local t = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
   if t then return t.r, t.g, t.b end
   return 1,1,1
+end
+
+local function PlayerClassFile()
+  local loc, file = UnitClass("player")
+  return file or loc or "UNKNOWN"
+end
+
+local function PlayerCanProvide(key)
+  local def = REG[key]
+  if not def or not def.providers then return false end
+  return def.providers[ PlayerClassFile() ] and true or false
 end
 
 local function CollectBuffTextures(unit)
@@ -86,10 +188,9 @@ local function HasAnyTextureMatch(seen, substrings)
   return false, nil
 end
 
-local CLASS_ORDER = {
-  WARRIOR=1, PRIEST=2, DRUID=3, MAGE=4, ROGUE=5, HUNTER=6, WARLOCK=7, PALADIN=8, SHAMAN=9
-}
-
+-- ===============================
+-- Roster & columns
+-- ===============================
 local function BuildRoster()
   local roster = {}
   local nRaid = GetNumRaidMembers and GetNumRaidMembers() or 0
@@ -97,27 +198,22 @@ local function BuildRoster()
   if nRaid > 0 then
     local i
     for i = 1, nRaid do
-      -- Vanilla returns (name, rank, subgroup, level, class, fileName, zone, online, isDead, role, isML)
       local name, rank, subgroup, level, class, fileName, zone, online = GetRaidRosterInfo(i)
       local unit = "raid"..i
-      -- Require both the raid API flag and the unit connection (belt + suspenders)
       local connected = (UnitIsConnected and UnitIsConnected(unit)) and true or false
       if name and online and connected then
         table.insert(roster, {
-          name = name,
-          unit = unit,
+          name = name, unit = unit,
           class = (fileName or class or "UNKNOWN"),
           subgroup = (subgroup or 9),
         })
       end
     end
   else
-    -- Solo/party
-    local pName = UnitName("player") or "player"
     if not (UnitIsConnected and UnitIsConnected("player")) then
-      -- player "offline" edge-case in some UIs; just return empty roster
       return roster
     end
+    local pName = UnitName("player") or "player"
     local ploc, pfile = UnitClass("player")
     table.insert(roster, { name = pName, unit = "player", class = (pfile or ploc or "UNKNOWN"), subgroup = 1 })
 
@@ -135,16 +231,14 @@ local function BuildRoster()
 
   table.sort(roster, function(a, b)
     if a.subgroup ~= b.subgroup then return (a.subgroup or 9) < (b.subgroup or 9) end
-    local CLASS_ORDER = { WARRIOR=1, PRIEST=2, DRUID=3, MAGE=4, ROGUE=5, HUNTER=6, WARLOCK=7, PALADIN=8, SHAMAN=9 }
-    local ca = CLASS_ORDER[a.class or "UNKNOWN"] or 99
-    local cb = CLASS_ORDER[b.class or "UNKNOWN"] or 99
+    local ca = D.CLASS_ORDER[a.class or "UNKNOWN"] or 99
+    local cb = D.CLASS_ORDER[b.class or "UNKNOWN"] or 99
     if ca ~= cb then return ca < cb end
     return (a.name or "") < (b.name or "")
   end)
 
   return roster
 end
-
 
 local function DetectProviders(roster)
   local providers = {}
@@ -155,23 +249,52 @@ local function DetectProviders(roster)
   return providers
 end
 
+-- Put self-castable columns first, then preserve ORDERED_KEYS order
 local function BuildActiveColumns(roster)
   local providers = DetectProviders(roster)
-  local cols = {}
+
+  local orderIndex = {}
   local i
-  for i=1, table.getn(ORDERED_KEYS) do
+  for i = 1, table.getn(ORDERED_KEYS) do
+    orderIndex[ORDERED_KEYS[i]] = i
+  end
+
+  local ploc, pfile = UnitClass("player")
+  local selfClass = pfile or ploc or "UNKNOWN"
+
+  local cols = {}
+  for i = 1, table.getn(ORDERED_KEYS) do
     local k = ORDERED_KEYS[i]
     local def = REG[k]
-    local needed = false
-    local cls, _
-    for cls,_ in pairs(def.providers) do
-      if providers[cls] then needed = true; break end
-    end
-    if needed then
-      table.insert(cols, { key=k, label=def.label, icon=def.headerIcon })
+    if def then
+      local needed = false
+      local cls, _
+      for cls,_ in pairs(def.providers or {}) do
+        if providers[cls] then needed = true; break end
+      end
+      if needed then
+        local canSelf = (def.providers and def.providers[selfClass] == true)
+        table.insert(cols, {
+          key=k, label=def.label, icon=def.headerIcon,
+          canSelf=canSelf, ord=(orderIndex[k] or 99),
+        })
+      end
     end
   end
-  return cols
+
+  table.sort(cols, function(a, b)
+    local wa = a.canSelf and 0 or 1
+    local wb = b.canSelf and 0 or 1
+    if wa ~= wb then return wa < wb end
+    return (a.ord or 99) < (b.ord or 99)
+  end)
+
+  local out = {}
+  for i=1, table.getn(cols) do
+    local c = cols[i]
+    out[i] = { key=c.key, label=c.label, icon=c.icon }
+  end
+  return out
 end
 
 local function Scan(roster, cols)
@@ -186,11 +309,11 @@ local function Scan(roster, cols)
     for c=1, table.getn(cols) do
       local key = cols[c].key
       local def = REG[key]
-      if def.needFn(unit) then
+      if def and def.needFn(unit) then
         local ok, path = HasAnyTextureMatch(seen, def.tex)
         if ok then present[key] = path else table.insert(missing, key) end
       else
-        present[key] = "__NA__" -- doesn't need (e.g. warrior for AI)
+        present[key] = "__NA__"
       end
     end
     results[name] = { present=present, missing=missing }
@@ -198,9 +321,37 @@ local function Scan(roster, cols)
   return results
 end
 
---===============================
--- UI
---===============================
+-- ===============================
+-- Click-to-buff
+-- ===============================
+local function HandleCellClick(cell, mouseButton)
+  if not cell or not cell.key or not cell.unit then return end
+  if not cell._missing then return end
+  if not PlayerCanProvide(cell.key) then return end
+
+  local iconsTable = SPELL_ICON[cell.key]
+  if not iconsTable then return end
+
+  local useGroup = (mouseButton == "RightButton")
+  local icons = useGroup and iconsTable.group or iconsTable.single
+  if not icons then return end
+
+  if UnitIsDeadOrGhost(cell.unit) then return end
+  if not UnitIsFriend("player", cell.unit) then return end
+
+  local ok = TryCastByIcon(icons, cell.unit)
+  if not ok and useGroup then
+    icons = iconsTable.single
+    if icons then ok = TryCastByIcon(icons, cell.unit) end
+  end
+  if not ok and FRT and FRT.Print then
+    FRT.Print("Checker: couldn't resolve/cast "..cell.key.." ("..(useGroup and "group" or "single").."). Open your spellbook once?")
+  end
+end
+
+-- ===============================
+-- UI building
+-- ===============================
 local function CreateHeader(parent)
   local header = CreateFrame("Frame", nil, parent)
   header:SetHeight(24)
@@ -282,13 +433,37 @@ local function SetRowCells(row, numCols)
   local colW = 18
   local i
   for i=1, numCols do
-    local f = CreateFrame("Frame", nil, row)
+    local f = CreateFrame("Button", nil, row) -- Button for hardware click
     f:SetWidth(colW); f:SetHeight(colW)
     f:SetPoint("LEFT", row, "LEFT", startX + (i-1)*(colW+10), 0)
+
     local t = f:CreateTexture(nil, "ARTWORK")
     t:SetAllPoints()
     t:SetTexture(TEX_CHECK)
     f.tex = t
+
+    f:RegisterForClicks() -- clear; enabled per-cell below
+    f:SetScript("OnClick", function() HandleCellClick(f, arg1) end)
+    f:SetScript("OnEnter", function()
+      if not f.key then return end
+      local def = REG[f.key]
+      if not def then return end
+      GameTooltip:SetOwner(f, "ANCHOR_RIGHT")
+      GameTooltip:SetText(def.label)
+      local iconsTable = SPELL_ICON[f.key]
+      if PlayerCanProvide(f.key) then
+        if iconsTable and iconsTable.single then GameTooltip:AddLine("Left-click: single buff", 0,1,0) end
+        if iconsTable and iconsTable.group  then GameTooltip:AddLine("Right-click: group buff",  0,1,0) end
+      else
+        GameTooltip:AddLine("You cannot cast this buff.", 1,0.3,0.3)
+      end
+      if not f._missing then
+        GameTooltip:AddLine("Already present or N/A.", 0.8,0.8,0.8)
+      end
+      GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     row.cells[i] = f
   end
 end
@@ -307,9 +482,16 @@ local function UpdateRowVisual(row, rosterEntry, cols, result)
   local i
   for i=1, table.getn(cols) do
     local key = cols[i].key
-    local tex = row.cells[i].tex
+    local cell = row.cells[i]
+    local tex = cell.tex
+
+    cell.unit = rosterEntry.unit
+    cell.key  = key
+
     local present = result and result.present and result.present[key]
     local isNA = (present == "__NA__")
+    local missing = (not isNA) and (not present)
+    cell._missing = missing
 
     if isNA then
       tex:SetTexture(TEX_CHECK)
@@ -321,18 +503,28 @@ local function UpdateRowVisual(row, rosterEntry, cols, result)
       tex:SetTexture(TEX_CROSS)
       tex:SetVertexColor(1.0, 0.2, 0.2, 1.0)
     end
+
+    local clickable = PlayerCanProvide(key) and missing and (SPELL_ICON[key] ~= nil)
+    cell:EnableMouse(clickable)
+    if clickable then
+      cell:RegisterForClicks("LeftButtonDown", "RightButtonDown")
+      cell:SetAlpha(1.0)
+    else
+      cell:RegisterForClicks() -- clear
+      cell:SetAlpha(0.6)
+    end
   end
 end
 
---===============================
+-- ===============================
 -- Data + grid refresh
---===============================
+-- ===============================
 local function RefreshDataAndGrid()
   if not UI.frame then return end
 
-  UI.roster = BuildRoster()
+  UI.roster     = BuildRoster()
   UI.activeCols = BuildActiveColumns(UI.roster)
-  UI.results = Scan(UI.roster, UI.activeCols)
+  UI.results    = Scan(UI.roster, UI.activeCols)
 
   -- filter mapping
   UI.filteredIndex = {}
@@ -348,6 +540,34 @@ local function RefreshDataAndGrid()
   end
 
   SetHeaderColumns(UI.header, UI.activeCols)
+
+  -- Header tooltips with missing counts (use local copies to avoid upvalue trap)
+  local hCount = table.getn(UI.header.cols)
+  for i=1, hCount do
+    local col = UI.activeCols[i]
+    local missingCount = 0
+    local r
+    for r=1, table.getn(UI.filteredIndex) do
+      local idx = UI.filteredIndex[r]
+      local e = UI.roster[idx]
+      local res = e and UI.results[e.name]
+      if res then
+        local present = res.present[col.key]
+        if not present or present == false then missingCount = missingCount + 1 end
+      end
+    end
+    local h = UI.header.cols[i]
+    local colLabel = col.label
+    local missCopy = missingCount
+    h:EnableMouse(true)
+    h:SetScript("OnEnter", function()
+      GameTooltip:SetOwner(h, "ANCHOR_BOTTOM")
+      GameTooltip:SetText(colLabel)
+      GameTooltip:AddLine("Missing: "..missCopy, 1,0.6,0.6)
+      GameTooltip:Show()
+    end)
+    h:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  end
 
   local total = table.getn(UI.filteredIndex)
   FauxScrollFrame_Update(UI.scroll, total, VISIBLE_ROWS, ROW_HEIGHT)
@@ -370,9 +590,9 @@ local function RefreshDataAndGrid()
   end
 end
 
---===============================
--- Live updates (events + simple 1s timer)
---===============================
+-- ===============================
+-- Live updates (events + debounce)
+-- ===============================
 local function IsGroupUnit(u)
   if not u then return false end
   local p4 = string.sub(u,1,4)
@@ -380,7 +600,6 @@ local function IsGroupUnit(u)
   return (u == "player") or (p4 == "raid") or (p5 == "party")
 end
 
--- optional: quick refresh on known events (debounced)
 local function RequestRefreshSoon(delay)
   if not UI.frame or not UI.frame:IsShown() then return end
   if not delay then delay = 0.20 end
@@ -427,9 +646,9 @@ local function RegisterLiveEvents(enable)
   end
 end
 
---===============================
+-- ===============================
 -- Build UI
---===============================
+-- ===============================
 local function BuildUI()
   if UI.frame then return end
 
@@ -453,19 +672,13 @@ local function BuildUI()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
-  local refresh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-  refresh:SetWidth(80); refresh:SetHeight(20)
-  refresh:SetPoint("TOPRIGHT", f, "TOPRIGHT", -16, -12)
-  refresh:SetText("Refresh")
-  refresh:SetScript("OnClick", function() RefreshDataAndGrid() end)
-
   local only = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-  only:SetPoint("TOPRIGHT", refresh, "LEFT", -12, 0)
+  only:SetPoint("TOPRIGHT", f, "TOPRIGHT", -110, -12)
   only.text = only:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
   only.text:SetPoint("LEFT", only, "RIGHT", 2, 0)
   only.text:SetText("Only Missing")
   only:SetScript("OnClick", function()
-    UI.onlyMissing = (only:GetChecked() and true or false)  -- 1 or nil → boolean
+    UI.onlyMissing = (only:GetChecked() and true or false)
     RefreshDataAndGrid()
   end)
 
@@ -482,19 +695,19 @@ local function BuildUI()
   f.scrollChild = child
 
   scroll:SetScript("OnVerticalScroll", function()
-  FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshDataAndGrid)
-end)
+    FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshDataAndGrid)
+  end)
 
   local footer = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   footer:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 12)
   footer:SetText("")
   f.footer = footer
 
-  -- Live: events + 1s auto-refresh while visible
+  -- Events + 1s auto-refresh while visible
   f._accum = 0
   f:SetScript("OnShow", function()
     RegisterLiveEvents(true)
-    f._accum = 1.0 -- force immediate refresh on show
+    f._accum = 1.0
     RefreshDataAndGrid()
   end)
   f:SetScript("OnHide", function()
@@ -514,18 +727,18 @@ end)
   UI.rows = nil -- force build on first refresh
 end
 
---===============================
+-- ===============================
 -- Public
---===============================
+-- ===============================
 function Checker.ShowUI()
   BuildUI()
   UI.frame:Show()
   RefreshDataAndGrid()
 end
 
---===============================
+-- ===============================
 -- Slash handling
---===============================
+-- ===============================
 function Checker.OnSlash(module, cmd, rest)
   if cmd ~= "check" then return false end
   local sub = ""
@@ -557,16 +770,16 @@ function Checker.GetHelp(module)
   }
 end
 
---===============================
+-- ===============================
 -- Lifecycle
---===============================
+-- ===============================
 function Checker.OnLoad(module)
-  if FRT and FRT.Print then FRT.Print("Checker loaded (auto-refresh).") end
+  if FRT and FRT.Print then FRT.Print("Checker loaded (auto-refresh + click-to-buff; using FRT_Data).") end
 end
 
---===============================
+-- ===============================
 -- Register with core
---===============================
+-- ===============================
 if FRT.RegisterModule then
   FRT.RegisterModule(Checker.name, Checker)
 end
