@@ -8,7 +8,6 @@ FRT = FRT or {}
 -- UI constants / textures
 --===============================
 local ROW_HEIGHT   = 18
-local DEFAULT_ROWS = 12
 local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
@@ -17,9 +16,11 @@ local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 --===============================
 local UI = {
   frame=nil, header=nil, scroll=nil, rows=nil, scrollChild=nil,
-  onlyMissing=false, filteredIndex={},
-  visibleRows=DEFAULT_ROWS, -- dynamic with resize
-  _lastTotal=0,             -- to detect roster size changes
+  -- Behavior: baseline = "missing only", no toggle for that anymore.
+  myBuffs=false,          -- NEW: show only columns you can provide
+  filteredIndex={},
+  visibleRows=0,          -- calculated on show/resize
+  _lastTotal=0,
 }
 
 --===============================
@@ -31,10 +32,8 @@ local function ClassColorRGB(class)
   return 1,1,1
 end
 
--- Hard clear any previously-created row frames so we don't stack leftovers.
 local function ClearRowFrames()
   if not UI.scrollChild then return end
-  -- Hide/unparent *all* children to be safe (covers old generations)
   local kids = { UI.scrollChild:GetChildren() }
   local i = 1
   while kids[i] do
@@ -58,12 +57,11 @@ local function RecalcVisibleRows()
     if UI.scrollChild then
       UI.scrollChild:SetHeight(ROW_HEIGHT * UI.visibleRows)
     end
-    -- IMPORTANT: nuke old frames so we don't keep two generations around
     ClearRowFrames()
   end
 end
 
--- Compute & apply a dynamic minimum frame size based on current columns
+-- min size helpers (guard SetMinResize for 1.12 safety)
 local function ComputeMinSize(numCols)
   local LEFT_PAD  = 10
   local START_X   = 160
@@ -84,7 +82,23 @@ local function ApplyMinResizeForCols(frame, cols)
   if not frame then return end
   local n = (cols and table.getn(cols)) or 0
   local w, h = ComputeMinSize(n)
-  frame:SetMinResize(w, h)
+  if frame.SetMinResize then frame:SetMinResize(w, h) end
+end
+
+--===============================
+-- Column filtering (NEW)
+--===============================
+local function FilterColumnsForView(allCols)
+  if not UI.myBuffs then return allCols end
+  local filtered = {}
+  local i=1
+  while i <= table.getn(allCols) do
+    local col = allCols[i]
+    local ok = (FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)) or false
+    if ok then table.insert(filtered, col) end
+    i = i + 1
+  end
+  return filtered
 end
 
 --===============================
@@ -130,7 +144,7 @@ local function SetHeaderColumns(header, cols, roster, results)
     i = i + 1
   end
 
-  -- Tooltip with missing count (kept)
+  -- Tooltip with missing count for the **visible** columns
   i=1
   while i <= table.getn(header.cols) do
     local col = cols[i]
@@ -139,9 +153,10 @@ local function SetHeaderColumns(header, cols, roster, results)
     while r <= table.getn(roster) do
       local rn = roster[r].name
       local res = results[rn]
-      if res then
+      if res and res.present then
         local present = res.present[col.key]
-        if not present or present == false then missingCount = missingCount + 1 end
+        local isNA = (present == "__NA__")
+        if not isNA and not present then missingCount = missingCount + 1 end
       end
       r = r + 1
     end
@@ -204,17 +219,16 @@ local function SetRowCells(row, numCols)
   local colW = 18
   local i=1
   while i <= numCols do
-    local f = CreateFrame("Button", nil, row) -- button for hardware clicks
+    local f = CreateFrame("Button", nil, row)
     f:SetWidth(colW); f:SetHeight(colW)
     f:SetPoint("LEFT", row, "LEFT", startX + (i-1)*(colW+10), 0)
-    f:RegisterForClicks() -- set per-update
+    f:RegisterForClicks()
 
     local t = f:CreateTexture(nil, "ARTWORK")
     t:SetAllPoints()
     t:SetTexture(TEX_CHECK)
     f.tex = t
 
-    -- Click -> Core.TryCast
     f:SetScript("OnClick", function()
       if not f.key or not f.unit then return end
       if not f._missing then return end
@@ -302,15 +316,26 @@ end
 --===============================
 -- Refresh pipeline
 --===============================
-local function RebuildFilter(roster, results, onlyMissing, cols)
+-- Baseline behavior: rows show only raiders with at least ONE missing among the **visible** columns.
+local function RebuildFilter(roster, results, visibleCols)
   UI.filteredIndex = {}
   local i=1
   while i <= table.getn(roster) do
     local name = roster[i].name
     local res = results[name]
-    local show = true
-    if onlyMissing and res then
-      show = (table.getn(res.missing) > 0)
+    local show = false
+    if res and res.present and table.getn(visibleCols) > 0 then
+      local j=1
+      while j <= table.getn(visibleCols) do
+        local key = visibleCols[j].key
+        local p = res.present[key]
+        local isNA = (p == "__NA__")
+        if not isNA and not p then
+          show = true
+          break
+        end
+        j = j + 1
+      end
     end
     if show then table.insert(UI.filteredIndex, i) end
     i = i + 1
@@ -319,23 +344,22 @@ end
 
 local function RefreshGrid()
   if not UI.frame then return end
-  local roster  = (FRT.CheckerCore and FRT.CheckerCore.GetRoster())  or {}
-  local cols    = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
-  local results = (FRT.CheckerCore and FRT.CheckerCore.GetResults()) or {}
+  local roster   = (FRT.CheckerCore and FRT.CheckerCore.GetRoster())  or {}
+  local allCols  = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
+  local results  = (FRT.CheckerCore and FRT.CheckerCore.GetResults()) or {}
+
+  local cols = FilterColumnsForView(allCols)
 
   ApplyMinResizeForCols(UI.frame, cols)
   SetHeaderColumns(UI.header, cols, roster, results)
-  RebuildFilter(roster, results, UI.onlyMissing, cols)
+  RebuildFilter(roster, results, cols)
 
   local total = table.getn(UI.filteredIndex)
-
-  -- If the number of rows to display changed, nuke previous row frames to avoid stacking.
   if total ~= UI._lastTotal then
     ClearRowFrames()
     UI._lastTotal = total
   end
 
-  -- Update faux scroll and clamp offset
   FauxScrollFrame_Update(UI.scroll, total, UI.visibleRows, ROW_HEIGHT)
   local offset = FauxScrollFrame_GetOffset(UI.scroll) or 0
   if offset > 0 and (offset + UI.visibleRows) > total then
@@ -346,7 +370,10 @@ local function RefreshGrid()
 
   EnsureRows(UI.scrollChild)
 
-  -- hide everything first to avoid “stacking” artifacts
+  -- Shrink paint area when few rows
+  local used = math.max(1, math.min(UI.visibleRows, total))
+  UI.scrollChild:SetHeight(ROW_HEIGHT * used)
+
   if UI.rows then
     local r = 1
     while r <= table.getn(UI.rows) do
@@ -355,7 +382,6 @@ local function RefreshGrid()
     end
   end
 
-  -- paint just the visible window
   local i = 1
   while i <= UI.visibleRows do
     local idx = UI.filteredIndex[offset + i]
@@ -405,13 +431,14 @@ local function BuildUI()
   title:ClearAllPoints()
   title:SetPoint("LEFT", drag, "LEFT", 8, 0)
 
-  local only = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-  only:SetPoint("TOPRIGHT", f, "TOPRIGHT", -110, -12)
-  only.text = only:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-  only.text:SetPoint("LEFT", only, "RIGHT", 2, 0)
-  only.text:SetText("Only Missing")
-  only:SetScript("OnClick", function()
-    UI.onlyMissing = (only:GetChecked() and true or false)
+  -- REPLACED: "Only Missing" -> "My buffs"
+  local onlyMine = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+  onlyMine:SetPoint("TOPRIGHT", f, "TOPRIGHT", -110, -12)
+  onlyMine.text = onlyMine:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+  onlyMine.text:SetPoint("LEFT", onlyMine, "RIGHT", 2, 0)
+  onlyMine.text:SetText("My buffs")
+  onlyMine:SetScript("OnClick", function()
+    UI.myBuffs = (onlyMine:GetChecked() and true or false)
     RefreshGrid()
   end)
 
@@ -426,7 +453,7 @@ local function BuildUI()
   child:ClearAllPoints()
   child:SetPoint("TOPLEFT",  UI.scroll, "TOPLEFT",  0, 0)
   child:SetPoint("TOPRIGHT", UI.scroll, "TOPRIGHT", 0, 0)
-  child:SetHeight(ROW_HEIGHT * UI.visibleRows)
+  child:SetHeight(ROW_HEIGHT * (UI.visibleRows > 0 and UI.visibleRows or 4))
   f.scrollChild = child
   UI.scrollChild = child
 
@@ -436,8 +463,7 @@ local function BuildUI()
 
   -- Resize handle
   f:SetResizable(true)
-  f:SetMinResize(460, 260) -- baseline; tightened dynamically
-
+  if f.SetMinResize then f:SetMinResize(460, 260) end
   local sizer = CreateFrame("Button", nil, f)
   sizer:SetFrameLevel((f:GetFrameLevel() or 0) + 5)
   sizer:SetWidth(18); sizer:SetHeight(18)
@@ -453,6 +479,13 @@ local function BuildUI()
   sizer:SetScript("OnMouseUp", function()
     f:StopMovingOrSizing()
     if this and this.SetButtonState then this:SetButtonState("NORMAL") end
+    -- manual clamp for vanilla safety
+    local allCols  = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
+    local cols = FilterColumnsForView(allCols)
+    local mw, mh = ComputeMinSize(table.getn(cols))
+    local w, h = f:GetWidth(), f:GetHeight()
+    if w < mw then f:SetWidth(mw) end
+    if h < mh then f:SetHeight(mh) end
     RecalcVisibleRows()
     RefreshGrid()
   end)
