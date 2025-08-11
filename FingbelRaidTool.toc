@@ -31,6 +31,7 @@ subsystem\FRT_NoteNet.lua
 
 ui\FRT_RichScrollable.lua
 ui\FRT_ScrollableEdit.lua
+ui\FRT_IconGrid.lua
 
 FingbelMainEditor.lua
 

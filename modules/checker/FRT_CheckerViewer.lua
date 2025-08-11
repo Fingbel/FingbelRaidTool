@@ -8,7 +8,7 @@ FRT = FRT or {}
 -- UI constants / textures
 --===============================
 local ROW_HEIGHT   = 18
-local VISIBLE_ROWS = 12
+local DEFAULT_ROWS = 12
 local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
@@ -16,8 +16,10 @@ local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 -- Local UI state
 --===============================
 local UI = {
-  frame=nil, header=nil, scroll=nil, rows=nil,
+  frame=nil, header=nil, scroll=nil, rows=nil, scrollChild=nil,
   onlyMissing=false, filteredIndex={},
+  visibleRows=DEFAULT_ROWS, -- dynamic with resize
+  _lastTotal=0,             -- to detect roster size changes
 }
 
 --===============================
@@ -27,6 +29,62 @@ local function ClassColorRGB(class)
   local t = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
   if t then return t.r, t.g, t.b end
   return 1,1,1
+end
+
+-- Hard clear any previously-created row frames so we don't stack leftovers.
+local function ClearRowFrames()
+  if not UI.scrollChild then return end
+  -- Hide/unparent *all* children to be safe (covers old generations)
+  local kids = { UI.scrollChild:GetChildren() }
+  local i = 1
+  while kids[i] do
+    local k = kids[i]
+    k:Hide()
+    k:SetParent(nil)
+    kids[i] = nil
+    i = i + 1
+  end
+  UI.rows = nil
+end
+
+local function RecalcVisibleRows()
+  if not UI.scroll then return end
+  local h = UI.scroll:GetHeight() or 0
+  local rowsFit = math.floor(h / ROW_HEIGHT)
+  if rowsFit < 4 then rowsFit = 4 end
+  if rowsFit > 40 then rowsFit = 40 end
+  if rowsFit ~= UI.visibleRows then
+    UI.visibleRows = rowsFit
+    if UI.scrollChild then
+      UI.scrollChild:SetHeight(ROW_HEIGHT * UI.visibleRows)
+    end
+    -- IMPORTANT: nuke old frames so we don't keep two generations around
+    ClearRowFrames()
+  end
+end
+
+-- Compute & apply a dynamic minimum frame size based on current columns
+local function ComputeMinSize(numCols)
+  local LEFT_PAD  = 10
+  local START_X   = 160
+  local COL_W     = 22
+  local COL_SP    = 6
+  local RIGHT_PAD = 10
+
+  local minW = LEFT_PAD + START_X + (numCols * (COL_W + COL_SP)) + RIGHT_PAD
+  if minW < 460 then minW = 460 end
+
+  local MIN_ROWS = 4
+  local minH = 92 + (MIN_ROWS * ROW_HEIGHT)
+  if minH < 260 then minH = 260 end
+  return minW, minH
+end
+
+local function ApplyMinResizeForCols(frame, cols)
+  if not frame then return end
+  local n = (cols and table.getn(cols)) or 0
+  local w, h = ComputeMinSize(n)
+  frame:SetMinResize(w, h)
 end
 
 --===============================
@@ -115,10 +173,10 @@ local function CreateRow(parent)
 end
 
 local function EnsureRows(scrollChild)
-  if UI.rows and table.getn(UI.rows) >= VISIBLE_ROWS then return end
+  if UI.rows and table.getn(UI.rows) >= UI.visibleRows then return end
   UI.rows = UI.rows or {}
   local i = (table.getn(UI.rows) + 1)
-  while i <= VISIBLE_ROWS do
+  while i <= UI.visibleRows do
     local r = CreateRow(scrollChild)
     if i == 1 then
       r:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
@@ -265,17 +323,41 @@ local function RefreshGrid()
   local cols    = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
   local results = (FRT.CheckerCore and FRT.CheckerCore.GetResults()) or {}
 
+  ApplyMinResizeForCols(UI.frame, cols)
   SetHeaderColumns(UI.header, cols, roster, results)
   RebuildFilter(roster, results, UI.onlyMissing, cols)
 
   local total = table.getn(UI.filteredIndex)
-  FauxScrollFrame_Update(UI.scroll, total, VISIBLE_ROWS, ROW_HEIGHT)
 
-  local offset = FauxScrollFrame_GetOffset(UI.scroll)
-  EnsureRows(UI.frame.scrollChild)
+  -- If the number of rows to display changed, nuke previous row frames to avoid stacking.
+  if total ~= UI._lastTotal then
+    ClearRowFrames()
+    UI._lastTotal = total
+  end
 
-  local i=1
-  while i <= VISIBLE_ROWS do
+  -- Update faux scroll and clamp offset
+  FauxScrollFrame_Update(UI.scroll, total, UI.visibleRows, ROW_HEIGHT)
+  local offset = FauxScrollFrame_GetOffset(UI.scroll) or 0
+  if offset > 0 and (offset + UI.visibleRows) > total then
+    offset = math.max(0, total - UI.visibleRows)
+    local sb = getglobal((UI.scroll:GetName() or "").."ScrollBar")
+    if sb then sb:SetValue(offset * ROW_HEIGHT) end
+  end
+
+  EnsureRows(UI.scrollChild)
+
+  -- hide everything first to avoid “stacking” artifacts
+  if UI.rows then
+    local r = 1
+    while r <= table.getn(UI.rows) do
+      UI.rows[r]:Hide()
+      r = r + 1
+    end
+  end
+
+  -- paint just the visible window
+  local i = 1
+  while i <= UI.visibleRows do
     local idx = UI.filteredIndex[offset + i]
     local rosterEntry = idx and roster[idx] or nil
     UpdateRowVisual(UI.rows[i], rosterEntry, cols, results)
@@ -295,9 +377,9 @@ local function BuildUI()
   f:SetFrameStrata("DIALOG")
   f:SetBackdrop({
     bgFile  = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile= "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile=true, tileSize=16, edgeSize=32,
-    insets={ left=10, right=10, top=10, bottom=10 }
+    edgeFile= "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile=true, tileSize=16, edgeSize=14,
+    insets={ left=4, right=4, top=4, bottom=4 }
   })
   f:SetBackdropColor(0,0,0,0.85)
   f:SetBackdropBorderColor(1,1,1,1)
@@ -314,7 +396,7 @@ local function BuildUI()
   f:EnableMouse(true)
   local drag = CreateFrame("Frame", nil, f)
   drag:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -8)
-  drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -8) -- leave room for close button
+  drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -8)
   drag:SetHeight(28)
   drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
@@ -337,16 +419,42 @@ local function BuildUI()
 
   local scroll = CreateFrame("ScrollFrame", "FRT_CheckerScroll", f, "FauxScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -60)
-  scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -26, 32)
+  scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 32)
   UI.scroll = scroll
 
   local child = CreateFrame("Frame", nil, f)
-  child:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-  child:SetWidth(1); child:SetHeight(ROW_HEIGHT * VISIBLE_ROWS)
+  child:ClearAllPoints()
+  child:SetPoint("TOPLEFT",  UI.scroll, "TOPLEFT",  0, 0)
+  child:SetPoint("TOPRIGHT", UI.scroll, "TOPRIGHT", 0, 0)
+  child:SetHeight(ROW_HEIGHT * UI.visibleRows)
   f.scrollChild = child
+  UI.scrollChild = child
 
   scroll:SetScript("OnVerticalScroll", function()
     FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshGrid)
+  end)
+
+  -- Resize handle
+  f:SetResizable(true)
+  f:SetMinResize(460, 260) -- baseline; tightened dynamically
+
+  local sizer = CreateFrame("Button", nil, f)
+  sizer:SetFrameLevel((f:GetFrameLevel() or 0) + 5)
+  sizer:SetWidth(18); sizer:SetHeight(18)
+  sizer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 6)
+  sizer:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+  sizer:SetPushedTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+  sizer:SetHighlightTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+
+  sizer:SetScript("OnMouseDown", function()
+    f:StartSizing("BOTTOMRIGHT")
+    if this and this.SetButtonState then this:SetButtonState("PUSHED", true) end
+  end)
+  sizer:SetScript("OnMouseUp", function()
+    f:StopMovingOrSizing()
+    if this and this.SetButtonState then this:SetButtonState("NORMAL") end
+    RecalcVisibleRows()
+    RefreshGrid()
   end)
 
   -- hook core updates while visible
@@ -354,6 +462,7 @@ local function BuildUI()
     if FRT.CheckerCore then
       FRT.CheckerCore.SetLiveEvents(true)
     end
+    RecalcVisibleRows()
     RefreshGrid()
   end)
 
@@ -378,6 +487,7 @@ FRT.CheckerViewer = {
       FRT.CheckerCore.RefreshNow()
     end
     UI.frame:Show()
+    RecalcVisibleRows()
     RefreshGrid()
   end
 }
