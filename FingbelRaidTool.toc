@@ -30,3 +30,6 @@ modules\note\FRT_NoteViewer.lua
 modules\checker\FRT_CheckerCore.lua
 modules\checker\FRT_CheckerEditorPane.lua
 
+
+FRT_CasinoDemo.lua
+FRT_FrameTest.lua
