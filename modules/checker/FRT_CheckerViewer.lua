@@ -178,7 +178,7 @@ local function SetRowCells(row, numCols)
     f:SetScript("OnClick", function()
       if not f.key or not f.unit then return end
       if not f._missing then return end
-      if not f._inRange and f.visible then
+      if not f._inRange and not f.visible then
         if FRT and FRT.Print then FRT.Print("|cffffcc00Out of range.|r") end
         return
       end
@@ -208,7 +208,10 @@ local function UpdateCellRangeDecor(cell)
     return
   end
 
-  local inRange = FRT.Cast.InRangeByKey(cell.key, cell.unit)
+  local inRangeSingle = FRT.Cast.InRangeByKey(cell.key, cell.unit, false)
+  local inRangeGroup  = FRT.Cast.InRangeByKey(cell.key, cell.unit, true)
+  local inRange = inRangeSingle or inRangeGroup
+  
   local visible = FRT.Cast.IsVisiblyReachable(cell.unit)
 
   cell._inRange = inRange

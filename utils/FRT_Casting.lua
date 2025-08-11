@@ -30,10 +30,10 @@ do
     return FRT.Cast.IsInRangeByIndex(idx, unit)
   end
 
-  function FRT.Cast.InRangeByKey(key, unit)
+  function FRT.Cast.InRangeByKey(key, unit,wantGroup)
     local icons = FRT.CheckerRegistry and FRT.CheckerRegistry.GetSpellIcons(key)
     if not icons then return false end
-    local list = icons.single 
+    local list = (wantGroup and icons.group) or icons.single or icons.group
     if not list then return false end
     return FRT.Cast.InRangeByIcons(list, unit)
   end
