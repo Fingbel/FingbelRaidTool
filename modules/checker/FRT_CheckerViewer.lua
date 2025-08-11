@@ -350,21 +350,23 @@ local function BuildUI()
   f.footer = footer
 
   -- hook core updates while visible
-  f:SetScript("OnShow", function()
-    if FRT.CheckerCore then
-      FRT.CheckerCore.SetLiveEvents(true)
-      FRT.CheckerCore.RefreshNow() -- prime
-    end
-    RefreshGrid()
-  end)
-  f:SetScript("OnHide", function()
-    if FRT.CheckerCore then
-      FRT.CheckerCore.SetLiveEvents(false)
-    end
-  end)
+    f:SetScript("OnShow", function()
+        if FRT.CheckerCore then
+            -- viewer visibility doesn't need to trigger a fresh scan here;
+            -- we already prime in Viewer.Show() below.
+            FRT.CheckerCore.SetLiveEvents(true)
+        end
+        RefreshGrid()
+    end)
 
-  UI.frame = f
-  UI.rows = nil
+    f:SetScript("OnHide", function()
+        if FRT.CheckerCore then
+            FRT.CheckerCore.SetLiveEvents(false)
+        end
+    end)
+
+    UI.frame = f
+    UI.rows = nil
 end
 
 --===============================
@@ -373,10 +375,15 @@ end
 FRT.CheckerViewer = {
   Show = function()
     BuildUI()
+    if FRT.CheckerCore then      
+      FRT.CheckerCore.SetLiveEvents(true)
+      FRT.CheckerCore.RefreshNow()
+    end
     UI.frame:Show()
     RefreshGrid()
   end
 }
+
 
 -- Subscribe once so any core refresh pings the grid (if visible)
 if FRT.CheckerCore and FRT.CheckerCore.Subscribe then
