@@ -1,4 +1,4 @@
--- Fingbel Raid Tool - Checker Viewer (frames only)
+-- Fingbel Raid Tool - Checker Viewer (auto-sized, no scrolling, tight)
 -- Depends on FRT_CheckerCore
 -- Turtle WoW / Vanilla 1.12 / Lua 5.0
 
@@ -10,17 +10,35 @@ FRT = FRT or {}
 local ROW_HEIGHT   = 18
 local TEX_CHECK    = "Interface\\Buttons\\UI-CheckBox-Check"
 local TEX_CROSS    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+local TEX_WARN    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+
+-- Layout (tight)
+local HEADER_TOP_OFFSET = 38
+local HEADER_HEIGHT     = 24
+local PAD_LEFT          = 8
+local PAD_RIGHT         = 8
+local PAD_BELOW_HEADER  = 0
+local PAD_BOTTOM        = 8
+
+local NAME_START_X = 8
+local COL_START_X  = 160
+local COL_W        = 18
+local COL_SP       = 10
+local HEADER_COL_W = 22
+local HEADER_COL_SP= 6
+
+-- Empty overlay line sizes
+local EMPTY_ICON  = 24
+local EMPTY_GAP   = 2
+local EMPTY_TOTAL = EMPTY_ICON + EMPTY_GAP + EMPTY_ICON 
 
 --===============================
 -- Local UI state
 --===============================
 local UI = {
-  frame=nil, header=nil, scroll=nil, rows=nil, scrollChild=nil,
-  -- Behavior: baseline = "missing only", no toggle for that anymore.
-  myBuffs=false,          -- NEW: show only columns you can provide
+  frame=nil, header=nil, rows=nil, list=nil, empty=nil, content=nil, topBar=nil,
+  expand=false,            -- default: my buffs only; true: all buffs
   filteredIndex={},
-  visibleRows=0,          -- calculated on show/resize
-  _lastTotal=0,
 }
 
 --===============================
@@ -33,68 +51,23 @@ local function ClassColorRGB(class)
 end
 
 local function ClearRowFrames()
-  if not UI.scrollChild then return end
-  local kids = { UI.scrollChild:GetChildren() }
-  local i = 1
+  if not UI.list then return end
+  local kids = { UI.list:GetChildren() }
+  local i=1
   while kids[i] do
-    local k = kids[i]
-    k:Hide()
-    k:SetParent(nil)
-    kids[i] = nil
-    i = i + 1
+    local k = kids[i]; k:Hide(); k:SetParent(nil)
+    kids[i] = nil; i = i + 1
   end
   UI.rows = nil
 end
 
-local function RecalcVisibleRows()
-  if not UI.scroll then return end
-  local h = UI.scroll:GetHeight() or 0
-  local rowsFit = math.floor(h / ROW_HEIGHT)
-  if rowsFit < 4 then rowsFit = 4 end
-  if rowsFit > 40 then rowsFit = 40 end
-  if rowsFit ~= UI.visibleRows then
-    UI.visibleRows = rowsFit
-    if UI.scrollChild then
-      UI.scrollChild:SetHeight(ROW_HEIGHT * UI.visibleRows)
-    end
-    ClearRowFrames()
-  end
-end
-
--- min size helpers (guard SetMinResize for 1.12 safety)
-local function ComputeMinSize(numCols)
-  local LEFT_PAD  = 10
-  local START_X   = 160
-  local COL_W     = 22
-  local COL_SP    = 6
-  local RIGHT_PAD = 10
-
-  local minW = LEFT_PAD + START_X + (numCols * (COL_W + COL_SP)) + RIGHT_PAD
-  if minW < 460 then minW = 460 end
-
-  local MIN_ROWS = 4
-  local minH = 92 + (MIN_ROWS * ROW_HEIGHT)
-  if minH < 260 then minH = 260 end
-  return minW, minH
-end
-
-local function ApplyMinResizeForCols(frame, cols)
-  if not frame then return end
-  local n = (cols and table.getn(cols)) or 0
-  local w, h = ComputeMinSize(n)
-  if frame.SetMinResize then frame:SetMinResize(w, h) end
-end
-
---===============================
--- Column filtering (NEW)
---===============================
+-- Column filter: default only buffs I can provide; expand=true shows all
 local function FilterColumnsForView(allCols)
-  if not UI.myBuffs then return allCols end
-  local filtered = {}
-  local i=1
+  if UI.expand then return allCols end
+  local filtered, i = {}, 1
   while i <= table.getn(allCols) do
     local col = allCols[i]
-    local ok = (FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)) or false
+    local ok = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)
     if ok then table.insert(filtered, col) end
     i = i + 1
   end
@@ -106,12 +79,12 @@ end
 --===============================
 local function CreateHeader(parent)
   local header = CreateFrame("Frame", nil, parent)
-  header:SetHeight(24)
-  header:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -38)
-  header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -10, -38)
+  header:SetHeight(HEADER_HEIGHT)
+  header:SetPoint("TOPLEFT", parent, "TOPLEFT", PAD_LEFT, -HEADER_TOP_OFFSET - 20)
+  header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -PAD_RIGHT, -HEADER_TOP_OFFSET - 20)
 
   local name = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  name:SetPoint("LEFT", header, "LEFT", 8, 0)
+  name:SetPoint("LEFT", header, "LEFT", NAME_START_X, 0)
   name:SetText("Name")
   header.name = name
   header.cols = {}
@@ -127,40 +100,35 @@ local function SetHeaderColumns(header, cols, roster, results)
   end
   header.cols = {}
 
-  local startX = 160
-  local colW   = 22
-  i=1
-  while i <= table.getn(cols) do
+  local iCol=1
+  while iCol <= table.getn(cols) do
     local h = CreateFrame("Frame", nil, header)
-    h:SetWidth(colW); h:SetHeight(18)
-    h:SetPoint("LEFT", header, "LEFT", startX + (i-1)*(colW+6), 0)
+    h:SetWidth(HEADER_COL_W); h:SetHeight(18)
+    h:SetPoint("LEFT", header, "LEFT", COL_START_X + (iCol-1)*(HEADER_COL_W+HEADER_COL_SP), 0)
 
     local t = h:CreateTexture(nil, "ARTWORK"); t:SetAllPoints()
-    t:SetTexture(cols[i].icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    t:SetTexture(cols[iCol].icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    h.tex = t
-
-    header.cols[i] = h
-    i = i + 1
+    header.cols[iCol] = h
+    iCol = iCol + 1
   end
 
-  -- Tooltip with missing count for the **visible** columns
-  i=1
-  while i <= table.getn(header.cols) do
-    local col = cols[i]
-    local missingCount = 0
-    local r=1
+  -- Tooltip with missing count (visible cols)
+  iCol=1
+  while iCol <= table.getn(header.cols) do
+    local col = cols[iCol]
+    local missingCount, r = 0, 1
     while r <= table.getn(roster) do
       local rn = roster[r].name
       local res = results[rn]
       if res and res.present then
-        local present = res.present[col.key]
-        local isNA = (present == "__NA__")
-        if not isNA and not present then missingCount = missingCount + 1 end
+        local p = res.present[col.key]
+        local isNA = (p == "__NA__")
+        if not isNA and not p then missingCount = missingCount + 1 end
       end
       r = r + 1
     end
-    local h = header.cols[i]
+    local h = header.cols[iCol]
     local labelCopy, missCopy = col.label, missingCount
     h:EnableMouse(true)
     h:SetScript("OnEnter", function()
@@ -170,7 +138,7 @@ local function SetHeaderColumns(header, cols, roster, results)
       GameTooltip:Show()
     end)
     h:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    i = i + 1
+    iCol = iCol + 1
   end
 end
 
@@ -179,7 +147,7 @@ local function CreateRow(parent)
   row:SetHeight(ROW_HEIGHT)
 
   local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  name:SetPoint("LEFT", row, "LEFT", 8, 0)
+  name:SetPoint("LEFT", row, "LEFT", NAME_START_X, 0)
   name:SetText("Player")
   row.name = name
 
@@ -187,62 +155,33 @@ local function CreateRow(parent)
   return row
 end
 
-local function EnsureRows(scrollChild)
-  if UI.rows and table.getn(UI.rows) >= UI.visibleRows then return end
-  UI.rows = UI.rows or {}
-  local i = (table.getn(UI.rows) + 1)
-  while i <= UI.visibleRows do
-    local r = CreateRow(scrollChild)
-    if i == 1 then
-      r:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
-      r:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", 0, 0)
-    else
-      r:SetPoint("TOPLEFT", UI.rows[i-1], "BOTTOMLEFT", 0, 0)
-      r:SetPoint("TOPRIGHT", UI.rows[i-1], "BOTTOMRIGHT", 0, 0)
-    end
-    UI.rows[i] = r
-    i = i + 1
-  end
-end
-
 local function SetRowCells(row, numCols)
   if row.cells then
-    local i=1
-    while i <= table.getn(row.cells) do
-      row.cells[i]:Hide()
-      i = i + 1
-    end
+    local i=1; while i <= table.getn(row.cells) do row.cells[i]:Hide(); i = i + 1 end
   end
   row.cells = {}
 
-  local startX = 160
-  local colW = 18
   local i=1
   while i <= numCols do
     local f = CreateFrame("Button", nil, row)
-    f:SetWidth(colW); f:SetHeight(colW)
-    f:SetPoint("LEFT", row, "LEFT", startX + (i-1)*(colW+10), 0)
+    f:SetWidth(COL_W); f:SetHeight(COL_W)
+    f:SetPoint("LEFT", row, "LEFT", COL_START_X + (i-1)*(COL_W+COL_SP), 0)
     f:RegisterForClicks()
 
-    local t = f:CreateTexture(nil, "ARTWORK")
-    t:SetAllPoints()
-    t:SetTexture(TEX_CHECK)
+    local t = f:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetTexture(TEX_CHECK)
     f.tex = t
 
     f:SetScript("OnClick", function()
       if not f.key or not f.unit then return end
       if not f._missing then return end
       local useGroup = (arg1 == "RightButton")
-      if FRT.CheckerCore and FRT.CheckerCore.TryCast then
-        FRT.CheckerCore.TryCast(f.key, f.unit, useGroup)
-      end
+      if FRT.CheckerCore and FRT.CheckerCore.TryCast then FRT.CheckerCore.TryCast(f.key, f.unit, useGroup) end
     end)
 
     f:SetScript("OnEnter", function()
       if not f.key then return end
-      local col = f._colLabel
       GameTooltip:SetOwner(f, "ANCHOR_RIGHT")
-      GameTooltip:SetText(col or "Buff")
+      GameTooltip:SetText(f._colLabel or "Buff")
       if f._canCast then
         GameTooltip:AddLine("Left-click: single buff", 0,1,0)
         GameTooltip:AddLine("Right-click: group buff (if known)", 0,1,0)
@@ -266,8 +205,7 @@ local function UpdateRowVisual(row, rosterEntry, cols, results)
   if not rosterEntry then row:Hide(); return end
   row:Show()
   row.name:SetText(rosterEntry.name or "?")
-  local r,g,b = ClassColorRGB(rosterEntry.class or "")
-  row.name:SetTextColor(r,g,b)
+  local r,g,b = ClassColorRGB(rosterEntry.class or ""); row.name:SetTextColor(r,g,b)
 
   if not row.cells or table.getn(row.cells) ~= table.getn(cols) then
     SetRowCells(row, table.getn(cols))
@@ -275,13 +213,8 @@ local function UpdateRowVisual(row, rosterEntry, cols, results)
 
   local i=1
   while i <= table.getn(cols) do
-    local key = cols[i].key
-    local cell = row.cells[i]
-    local tex = cell.tex
-
-    cell.unit = rosterEntry.unit
-    cell.key  = key
-    cell._colLabel = cols[i].label
+    local key, cell, tex = cols[i].key, row.cells[i], row.cells[i].tex
+    cell.unit = rosterEntry.unit; cell.key = key; cell._colLabel = cols[i].label
 
     local res = results[rosterEntry.name]
     local present = res and res.present and res.present[key]
@@ -301,28 +234,117 @@ local function UpdateRowVisual(row, rosterEntry, cols, results)
     local clickable = canCast and missing
     cell._canCast = canCast
     cell:EnableMouse(clickable)
-    if clickable then
-      cell:RegisterForClicks("LeftButtonDown", "RightButtonDown")
-      cell:SetAlpha(1.0)
-    else
-      cell:RegisterForClicks()
-      cell:SetAlpha(0.6)
-    end
+    if clickable then cell:RegisterForClicks("LeftButtonDown","RightButtonDown"); cell:SetAlpha(1.0)
+    else cell:RegisterForClicks(); cell:SetAlpha(0.6) end
 
     i = i + 1
   end
 end
 
+-- Ensure we have exactly `needed` row frames (no scrolling)
+local function EnsureRowCount(parent, needed)
+  UI.rows = UI.rows or {}
+  local have = table.getn(UI.rows)
+
+  local i = have + 1
+  while i <= needed do
+    local r = CreateRow(parent)
+    if i == 1 then
+      r:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+      r:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+    else
+      r:SetPoint("TOPLEFT", UI.rows[i-1], "BOTTOMLEFT", 0, 0)
+      r:SetPoint("TOPRIGHT", UI.rows[i-1], "BOTTOMRIGHT", 0, 0)
+    end
+    UI.rows[i] = r
+    i = i + 1
+  end
+
+  if needed < have then
+    local j = needed + 1
+    while j <= have do UI.rows[j]:Hide(); j = j + 1 end
+  end
+end
+
 --===============================
--- Refresh pipeline
+-- Empty overlay (two lines, left-aligned; anchored just under title)
 --===============================
--- Baseline behavior: rows show only raiders with at least ONE missing among the **visible** columns.
+local function EnsureEmptyOverlay(parent)
+  if UI.empty and UI.empty:GetParent() ~= parent then
+    UI.empty:SetParent(parent)
+  end
+  if UI.empty then return end
+
+  local ov = CreateFrame("Frame", nil, parent)
+  -- Anchor to the same region rows start in (content top)
+  ov:SetPoint("TOPLEFT", parent, "TOPLEFT", NAME_START_X, 0)
+  ov:SetPoint("RIGHT",   parent, "RIGHT",  -PAD_RIGHT, 0)
+  ov:SetHeight(EMPTY_TOTAL)
+  ov:SetFrameStrata("DIALOG")
+  ov:SetFrameLevel((parent:GetFrameLevel() or 0) + 50)
+  ov:Hide()
+
+  -- Line 1 (you)
+  local l1tex = ov:CreateTexture(nil, "OVERLAY")
+  l1tex:SetTexture(TEX_CHECK)
+  l1tex:SetWidth(EMPTY_ICON); l1tex:SetHeight(EMPTY_ICON)
+  l1tex:SetPoint("TOPLEFT", ov, "TOPLEFT", 0, 0)
+  l1tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
+
+  local l1msg = ov:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  l1msg:SetPoint("LEFT", l1tex, "RIGHT", 8, 0)
+  l1msg:SetText("Job done !")
+  l1msg:SetTextColor(0.9, 0.9, 0.9, 1)
+  l1msg:SetJustifyH("LEFT")
+
+  -- Line 2 (others)
+  local l2tex = ov:CreateTexture(nil, "OVERLAY")
+  l2tex:SetWidth(EMPTY_ICON); l2tex:SetHeight(EMPTY_ICON)
+  l2tex:SetPoint("TOPLEFT", l1tex, "BOTTOMLEFT", 0, -EMPTY_GAP)
+
+  local l2msg = ov:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  l2msg:SetPoint("LEFT", l2tex, "RIGHT", 8, 0)
+  l2msg:SetTextColor(0.9, 0.9, 0.9, 1)
+  l2msg:SetJustifyH("LEFT")
+
+  ov.l1 = { tex = l1tex, msg = l1msg }
+  ov.l2 = { tex = l2tex, msg = l2msg }
+  UI.empty = ov
+end
+
+--===============================
+-- Logic helpers
+--===============================
+local function AnyMissingForOtherClasses(roster, results)
+  local allCols = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
+  local i=1
+  while i <= table.getn(allCols) do
+    local col = allCols[i]
+    local mine = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)
+    if not mine then
+      local r=1
+      while r <= table.getn(roster) do
+        local rn = roster[r].name
+        local res = results[rn]
+        if res and res.present then
+          local p = res.present[col.key]
+          local isNA = (p == "__NA__")
+          if not isNA and not p then return true end
+        end
+        r = r + 1
+      end
+    end
+    i = i + 1
+  end
+  return false
+end
+
+-- Baseline: show only raiders with >=1 missing among **visible** columns.
 local function RebuildFilter(roster, results, visibleCols)
   UI.filteredIndex = {}
   local i=1
   while i <= table.getn(roster) do
-    local name = roster[i].name
-    local res = results[name]
+    local res = results[ roster[i].name ]
     local show = false
     if res and res.present and table.getn(visibleCols) > 0 then
       local j=1
@@ -330,10 +352,7 @@ local function RebuildFilter(roster, results, visibleCols)
         local key = visibleCols[j].key
         local p = res.present[key]
         local isNA = (p == "__NA__")
-        if not isNA and not p then
-          show = true
-          break
-        end
+        if not isNA and not p then show = true; break end
         j = j + 1
       end
     end
@@ -342,64 +361,93 @@ local function RebuildFilter(roster, results, visibleCols)
   end
 end
 
+--===============================
+-- Refresh pipeline
+--===============================
 local function RefreshGrid()
   if not UI.frame then return end
+
   local roster   = (FRT.CheckerCore and FRT.CheckerCore.GetRoster())  or {}
   local allCols  = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
   local results  = (FRT.CheckerCore and FRT.CheckerCore.GetResults()) or {}
 
   local cols = FilterColumnsForView(allCols)
 
-  ApplyMinResizeForCols(UI.frame, cols)
+  -- Build overlay once on the content area
+  if UI.content and (not UI.empty or UI.empty:GetParent() ~= UI.content) then
+    EnsureEmptyOverlay(UI.content)
+  end
+
   SetHeaderColumns(UI.header, cols, roster, results)
   RebuildFilter(roster, results, cols)
 
   local total = table.getn(UI.filteredIndex)
-  if total ~= UI._lastTotal then
-    ClearRowFrames()
-    UI._lastTotal = total
-  end
+  local hasRows = (total > 0)
 
-  FauxScrollFrame_Update(UI.scroll, total, UI.visibleRows, ROW_HEIGHT)
-  local offset = FauxScrollFrame_GetOffset(UI.scroll) or 0
-  if offset > 0 and (offset + UI.visibleRows) > total then
-    offset = math.max(0, total - UI.visibleRows)
-    local sb = getglobal((UI.scroll:GetName() or "").."ScrollBar")
-    if sb then sb:SetValue(offset * ROW_HEIGHT) end
-  end
+  -- Toggle header/rows/overlay
+  if hasRows then
+    if UI.header then UI.header:Show() end
+    if UI.list   then UI.list:Show()  end
+    if UI.empty  then UI.empty:Hide() end
+  else
+    if UI.header then UI.header:Hide() end
+    if UI.list   then UI.list:Hide()  end
+    if UI.empty  then
+      UI.empty.l1.tex:SetTexture(TEX_CHECK)
+      UI.empty.l1.tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
+      UI.empty.l1.msg:SetText("Job done !")
 
-  EnsureRows(UI.scrollChild)
+      local othersNeed = AnyMissingForOtherClasses(roster, results)
+      if othersNeed then
+        UI.empty.l2.tex:SetTexture(TEX_CROSS)
+        UI.empty.l2.tex:SetVertexColor(1.0, 0.2, 0.2, 1.0)
+        UI.empty.l2.msg:SetText("Raid still missing buffs")
+      else
+        UI.empty.l2.tex:SetTexture(TEX_CHECK)
+        UI.empty.l2.tex:SetVertexColor(0.2, 1.0, 0.2, 1.0)
+        UI.empty.l2.msg:SetText("Raid fully buffed")
+      end
 
-  -- Shrink paint area when few rows
-  local used = math.max(1, math.min(UI.visibleRows, total))
-  UI.scrollChild:SetHeight(ROW_HEIGHT * used)
-
-  if UI.rows then
-    local r = 1
-    while r <= table.getn(UI.rows) do
-      UI.rows[r]:Hide()
-      r = r + 1
+      UI.empty:Show()
     end
   end
 
-  local i = 1
-  while i <= UI.visibleRows do
-    local idx = UI.filteredIndex[offset + i]
-    local rosterEntry = idx and roster[idx] or nil
+  -- Paint rows
+  EnsureRowCount(UI.list, total)
+  local i=1
+  while i <= total do
+    local rosterEntry = roster[ UI.filteredIndex[i] ]
     UpdateRowVisual(UI.rows[i], rosterEntry, cols, results)
     i = i + 1
   end
+
+  -- === SIZING (no header height in empty state) ===
+  local perCol = HEADER_COL_W + HEADER_COL_SP
+  local w = PAD_LEFT + COL_START_X + (table.getn(cols) * perCol) + PAD_RIGHT
+  if w < (PAD_LEFT + COL_START_X + PAD_RIGHT) then
+    w = PAD_LEFT + COL_START_X + PAD_RIGHT
+  end
+
+  local listH     = hasRows and (total * ROW_HEIGHT) or EMPTY_TOTAL
+  local contentH  = hasRows and (HEADER_HEIGHT + listH) or listH
+  local padTop    = HEADER_TOP_OFFSET + (hasRows and HEADER_HEIGHT or 0) + PAD_BELOW_HEADER
+
+  if UI.list    then UI.list:SetHeight(listH) end
+  if UI.content then UI.content:SetHeight(contentH) end
+
+  UI.frame:SetHeight(padTop + listH + PAD_BOTTOM)
+  UI.frame:SetWidth(w)
 end
 
 --===============================
--- Build UI
+-- Build UI ( +/- left of title; colored glyph; content below )
 --===============================
 local function BuildUI()
   if UI.frame then return end
 
   local f = CreateFrame("Frame", "FRT_CheckerFrame", UIParent)
   f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-  f:SetWidth(560); f:SetHeight(360)
+  f:SetWidth(400); f:SetHeight(200)
   f:SetFrameStrata("DIALOG")
   f:SetBackdrop({
     bgFile  = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -410,99 +458,87 @@ local function BuildUI()
   f:SetBackdropColor(0,0,0,0.85)
   f:SetBackdropBorderColor(1,1,1,1)
 
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -12)
-  title:SetText("FRT Checker — Missing Buffs")
-
+  -- Close
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
-  -- Drag by title area
-  f:SetMovable(true)
-  f:EnableMouse(true)
+  -- Drag area
+  f:SetMovable(true); f:EnableMouse(true)
   local drag = CreateFrame("Frame", nil, f)
   drag:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -8)
   drag:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -8)
-  drag:SetHeight(28)
-  drag:EnableMouse(true)
+  drag:SetHeight(28); drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
   drag:SetScript("OnDragStart", function() f:StartMoving() end)
   drag:SetScript("OnDragStop",  function() f:StopMovingOrSizing() end)
-  title:ClearAllPoints()
-  title:SetPoint("LEFT", drag, "LEFT", 8, 0)
 
-  -- REPLACED: "Only Missing" -> "My buffs"
-  local onlyMine = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-  onlyMine:SetPoint("TOPRIGHT", f, "TOPRIGHT", -110, -12)
-  onlyMine.text = onlyMine:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-  onlyMine.text:SetPoint("LEFT", onlyMine, "RIGHT", 2, 0)
-  onlyMine.text:SetText("My buffs")
-  onlyMine:SetScript("OnClick", function()
-    UI.myBuffs = (onlyMine:GetChecked() and true or false)
-    RefreshGrid()
+  -- Top bar: +/- left, title right
+  local topBar = CreateFrame("Frame", nil, f)
+  topBar:SetPoint("TOPLEFT", f, "TOPLEFT", PAD_LEFT, -12)
+  topBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD_RIGHT, -12)
+  topBar:SetHeight(20)
+  topBar:EnableMouse(true)
+  topBar:RegisterForDrag("LeftButton")
+  topBar:SetScript("OnDragStart", function()
+    if not MouseIsOver(topBar._expandBtn) then f:StartMoving() end
   end)
+  topBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+  UI.topBar = topBar
 
-  UI.header = CreateHeader(f)
+  local expandBtn = CreateFrame("Button", nil, topBar)
+  expandBtn:SetWidth(20); expandBtn:SetHeight(20)
+  expandBtn:SetPoint("LEFT", topBar, "LEFT", 8, 0)
+  expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+  topBar._expandBtn = expandBtn
 
-  local scroll = CreateFrame("ScrollFrame", "FRT_CheckerScroll", f, "FauxScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -60)
-  scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 32)
-  UI.scroll = scroll
-
-  local child = CreateFrame("Frame", nil, f)
-  child:ClearAllPoints()
-  child:SetPoint("TOPLEFT",  UI.scroll, "TOPLEFT",  0, 0)
-  child:SetPoint("TOPRIGHT", UI.scroll, "TOPRIGHT", 0, 0)
-  child:SetHeight(ROW_HEIGHT * (UI.visibleRows > 0 and UI.visibleRows or 4))
-  f.scrollChild = child
-  UI.scrollChild = child
-
-  scroll:SetScript("OnVerticalScroll", function()
-    FauxScrollFrame_OnVerticalScroll(this, arg1, ROW_HEIGHT, RefreshGrid)
+  local glyph = expandBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  glyph:SetPoint("CENTER", expandBtn, "CENTER", 0, 0)
+  glyph:SetTextColor(0.35, 0.9, 1.0)
+  local function UpdateExpandGlyph()
+    if UI.expand then glyph:SetText("-"); expandBtn.tooltip = "Show only my buffs"
+    else glyph:SetText("+"); expandBtn.tooltip = "Show all buffs" end
+  end
+  expandBtn:SetScript("OnClick", function() UI.expand = not UI.expand; UpdateExpandGlyph(); RefreshGrid() end)
+  expandBtn:SetScript("OnEnter", function()
+    if expandBtn.tooltip then GameTooltip:SetOwner(expandBtn, "ANCHOR_BOTTOMRIGHT"); GameTooltip:SetText(expandBtn.tooltip) end
   end)
+  expandBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  UpdateExpandGlyph()
 
-  -- Resize handle
-  f:SetResizable(true)
-  if f.SetMinResize then f:SetMinResize(460, 260) end
-  local sizer = CreateFrame("Button", nil, f)
-  sizer:SetFrameLevel((f:GetFrameLevel() or 0) + 5)
-  sizer:SetWidth(18); sizer:SetHeight(18)
-  sizer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 6)
-  sizer:SetNormalTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  sizer:SetPushedTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
-  sizer:SetHighlightTexture("Interface\\DialogFrame\\UI-DialogBox-Corner")
+  local title = topBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  title:SetPoint("LEFT", expandBtn, "RIGHT", 8, 0)
+  title:SetText("Buffs")
 
-  sizer:SetScript("OnMouseDown", function()
-    f:StartSizing("BOTTOMRIGHT")
-    if this and this.SetButtonState then this:SetButtonState("PUSHED", true) end
-  end)
-  sizer:SetScript("OnMouseUp", function()
-    f:StopMovingOrSizing()
-    if this and this.SetButtonState then this:SetButtonState("NORMAL") end
-    -- manual clamp for vanilla safety
-    local allCols  = (FRT.CheckerCore and FRT.CheckerCore.GetColumns()) or {}
-    local cols = FilterColumnsForView(allCols)
-    local mw, mh = ComputeMinSize(table.getn(cols))
-    local w, h = f:GetWidth(), f:GetHeight()
-    if w < mw then f:SetWidth(mw) end
-    if h < mh then f:SetHeight(mh) end
-    RecalcVisibleRows()
-    RefreshGrid()
-  end)
+  -- Content area
+  local content = CreateFrame("Frame", nil, f)
+  content:SetPoint("TOPLEFT", topBar, "BOTTOMLEFT", 0, -4)
+  content:SetPoint("TOPRIGHT", topBar, "BOTTOMRIGHT", 0, -4)
+  content:SetHeight(ROW_HEIGHT)
+  UI.content = content
 
-  -- hook core updates while visible
+  -- Header (re-anchored flat to content)
+  UI.header = CreateHeader(content)
+  UI.header:ClearAllPoints()
+  UI.header:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+  UI.header:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+
+  -- Rows list
+  local list = CreateFrame("Frame", nil, content)
+  list:SetPoint("TOPLEFT", UI.header, "BOTTOMLEFT", 0, 0)
+  list:SetPoint("TOPRIGHT", UI.header, "BOTTOMRIGHT", 0, 0)
+  list:SetHeight(ROW_HEIGHT)
+  UI.list = list
+
+  -- Empty overlay on content (anchored just under the title, left-aligned with Name)
+  EnsureEmptyOverlay(UI.content)
+
+  -- Live updates while visible
   f:SetScript("OnShow", function()
-    if FRT.CheckerCore then
-      FRT.CheckerCore.SetLiveEvents(true)
-    end
-    RecalcVisibleRows()
+    if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(true) end
     RefreshGrid()
   end)
-
   f:SetScript("OnHide", function()
-    if FRT.CheckerCore then
-      FRT.CheckerCore.SetLiveEvents(false)
-    end
+    if FRT.CheckerCore then FRT.CheckerCore.SetLiveEvents(false) end
   end)
 
   UI.frame = f
@@ -520,7 +556,6 @@ FRT.CheckerViewer = {
       FRT.CheckerCore.RefreshNow()
     end
     UI.frame:Show()
-    RecalcVisibleRows()
     RefreshGrid()
   end
 }
@@ -528,8 +563,6 @@ FRT.CheckerViewer = {
 -- Subscribe once so any core refresh pings the grid (if visible)
 if FRT.CheckerCore and FRT.CheckerCore.Subscribe then
   FRT.CheckerCore.Subscribe(function()
-    if UI.frame and UI.frame:IsShown() then
-      RefreshGrid()
-    end
+    if UI.frame and UI.frame:IsShown() then RefreshGrid() end
   end)
 end
