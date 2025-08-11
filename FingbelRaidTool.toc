@@ -15,9 +15,6 @@ dumpers\FRT_TalentDump.lua
 dumpers\FRT_BuffDump.lua
 dumpers\FRT_GuildDump.lua
 
-ui\FRT_UI_RichScrollable.lua.lua
-ui\FRT_ScrollableEdit.lua
-
 utils\FRT_Utils.lua
 utils\FRT_Class.lua
 utils\FRT_Group.lua
@@ -32,6 +29,8 @@ utils\FRT_DataNeed.lua
 subsystem\FRT_Parser.lua
 subsystem\FRT_NoteNet.lua
 
+ui\FRT_RichScrollable.lua
+ui\FRT_ScrollableEdit.lua
 
 FingbelMainEditor.lua
 
