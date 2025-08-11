@@ -15,13 +15,13 @@ local TEX_WARN    = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 -- Layout (tight)
 local HEADER_TOP_OFFSET = 38
 local HEADER_HEIGHT     = 24
-local PAD_LEFT          = 8
-local PAD_RIGHT         = 8
+local PAD_LEFT          = 4
+local PAD_RIGHT         = 4
 local PAD_BELOW_HEADER  = 0
-local PAD_BOTTOM        = 8
+local PAD_BOTTOM        = 4
 
 local NAME_START_X = 8
-local COL_START_X  = 160
+local COL_START_X  = 90
 local COL_W        = 18
 local COL_SP       = 10
 local HEADER_COL_W = 22
@@ -50,15 +50,16 @@ local function ClassColorRGB(class)
   return 1,1,1
 end
 
-local function ClearRowFrames()
-  if not UI.list then return end
-  local kids = { UI.list:GetChildren() }
-  local i=1
-  while kids[i] do
-    local k = kids[i]; k:Hide(); k:SetParent(nil)
-    kids[i] = nil; i = i + 1
+-- Force "my columns" regardless of UI.expand (for sizing in empty/expanded state)
+local function FilterMyColumns(allCols)
+  local filtered, i = {}, 1
+  while i <= table.getn(allCols) do
+    local col = allCols[i]
+    local ok = FRT.CheckerCore and FRT.CheckerCore.PlayerCanProvide and FRT.CheckerCore.PlayerCanProvide(col.key)
+    if ok then table.insert(filtered, col) end
+    i = i + 1
   end
-  UI.rows = nil
+  return filtered
 end
 
 -- Column filter: default only buffs I can provide; expand=true shows all
@@ -82,10 +83,14 @@ local function CreateHeader(parent)
   header:SetHeight(HEADER_HEIGHT)
   header:SetPoint("TOPLEFT", parent, "TOPLEFT", PAD_LEFT, -HEADER_TOP_OFFSET - 20)
   header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -PAD_RIGHT, -HEADER_TOP_OFFSET - 20)
+  
 
   local name = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   name:SetPoint("LEFT", header, "LEFT", NAME_START_X, 0)
+  name:SetPoint("RIGHT", header, "LEFT", COL_START_X - 4, 0)
+  name:SetJustifyH("LEFT")
   name:SetText("Name")
+  
   header.name = name
   header.cols = {}
   return header
@@ -147,8 +152,10 @@ local function CreateRow(parent)
   row:SetHeight(ROW_HEIGHT)
 
   local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  name:SetPoint("LEFT", row, "LEFT", NAME_START_X, 0)
+  name:SetPoint("LEFT", row, "LEFT", NAME_START_X, 0)  
   name:SetText("Player")
+  name:SetPoint("RIGHT", row, "LEFT", COL_START_X - 4, 0)
+  name:SetJustifyH("LEFT")  
   row.name = name
 
   row.cells = {}
@@ -433,19 +440,29 @@ local function RefreshGrid()
     i = i + 1
   end
 
-  -- === SIZING (no header height in empty state) ===
+  -- === SIZING (expanded+empty uses "my columns" for width) ===
   local perCol = HEADER_COL_W + HEADER_COL_SP
-  local w = PAD_LEFT + COL_START_X + (table.getn(cols) * perCol) + PAD_RIGHT
+
+  -- Use the currently visible columns for width, EXCEPT when expanded AND empty:
+  local widthCols = cols
+  if (UI.expand and not hasRows) then
+    widthCols = FilterMyColumns(allCols)  -- size like non-expanded mode
+  end
+
+  local visibleColCount = (widthCols and table.getn(widthCols)) or 0
+  local w = PAD_LEFT + COL_START_X + (visibleColCount * perCol) + PAD_RIGHT
   if w < (PAD_LEFT + COL_START_X + PAD_RIGHT) then
     w = PAD_LEFT + COL_START_X + PAD_RIGHT
   end
 
-  local listH     = hasRows and (total * ROW_HEIGHT) or EMPTY_TOTAL
-  local contentH  = hasRows and (HEADER_HEIGHT + listH) or listH
-  local padTop    = HEADER_TOP_OFFSET + (hasRows and HEADER_HEIGHT or 0) + PAD_BELOW_HEADER
+  local padTop = HEADER_TOP_OFFSET + (hasRows and HEADER_HEIGHT or 0) + PAD_BELOW_HEADER
+  local listH  = hasRows and (total * ROW_HEIGHT) or EMPTY_TOTAL
 
   if UI.list    then UI.list:SetHeight(listH) end
-  if UI.content then UI.content:SetHeight(contentH) end
+  if UI.content then
+    local contentH = hasRows and (HEADER_HEIGHT + listH) or listH
+    UI.content:SetHeight(contentH)
+  end
 
   UI.frame:SetHeight(padTop + listH + PAD_BOTTOM)
   UI.frame:SetWidth(w)
