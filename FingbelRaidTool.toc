@@ -8,6 +8,7 @@
 
 FingbelRaidTool.lua
 FRT_Data.lua
+FRT_RaidData.lua
 
 dumpers\FRT_DebugDump.lua
 dumpers\FRT_SpecDump.lua
@@ -45,6 +46,3 @@ modules\checker\FRT_CheckerViewer.lua
 modules\checker\FRT_CheckerRegistry.lua
 modules\checker\FRT_CheckerColumns.lua
 modules\checker\FRT_CheckerScan.lua
-
-
-demo\FRT_CasinoDemo.lua
