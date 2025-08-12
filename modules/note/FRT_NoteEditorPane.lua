@@ -1,4 +1,4 @@
--- Fingbel Raid Tool - Note Editor Pane (Vanilla 1.12)
+-- Fingbel Raid Tool - Note Editor Pane (Vanilla 1.12 / Lua 5.0)
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
@@ -88,14 +88,76 @@ end
 function Note.BuildNoteEditorPane(parent)
   EnsureSaved()
 
-  local uiSV = FRT_Saved.ui.notes
+  local uiSV        = FRT_Saved.ui.notes
   local currentRaid = uiSV.selectedRaid or "Custom/Misc"
   local currentId   = uiSV.selectedId or nil
   local currentBoss = "General"
-  local dirty = false
 
-  -- forward locals for cross-calls
-  local RebuildList, LoadSelected, SaveCurrent
+  -- forward locals for cross-calls + ui refs
+  local RebuildList, LoadSelected, SaveCurrent, UpdateShareButtonState
+  local bossBtn, titleBox, ed
+  local btnSave, btnShare, btnDup, btnDel, btnNew
+  local UpdateButtonsState
+
+  -- editor enable/disable overlay
+  local editorEnabled = false
+  local right, rightOverlay, rightOverlayMsg
+
+  -- baseline tracking + squelch to avoid false dirty on programmatic SetText
+  local baseline = nil
+  local suppressDirty = 0
+  local function BeginSquelch() suppressDirty = suppressDirty + 1 end
+  local function EndSquelch() if suppressDirty > 0 then suppressDirty = suppressDirty - 1 end end
+
+  local function EditorSnapshot()
+    local t = (ed and ed.GetText and (ed.GetText() or "")) or ""
+    local ttl = (titleBox and titleBox.GetText and (titleBox:GetText() or "")) or ""
+    return { raid=currentRaid, boss=(currentBoss or "General"), title=ttl, text=t }
+  end
+  local function SnapBaseline()
+    baseline = EditorSnapshot()
+  end
+  local function IsDirty()
+    if not editorEnabled then return false end
+    if not baseline then return false end
+    local cur = EditorSnapshot()
+    return not (cur.raid == baseline.raid and cur.boss == baseline.boss and cur.title == baseline.title and cur.text == baseline.text)
+  end
+  local function UpdateDirtyFromUserEdit()
+    if suppressDirty > 0 then return end
+    if UpdateButtonsState then UpdateButtonsState() end
+  end
+
+  -- ==== Modal blocker (clear focus + prevent refocus during popup) ====
+  local blocker = nil
+  local function EnsureBlocker()
+    if blocker then return end
+    blocker = CreateFrame("Frame", nil, parent)
+    blocker:SetAllPoints(parent)
+    blocker:EnableMouse(true)
+    blocker:SetFrameStrata("DIALOG")
+    blocker:SetFrameLevel((parent:GetFrameLevel() or 0) + 200)
+    local t = blocker:CreateTexture(nil, "BACKGROUND")
+    t:SetAllPoints(blocker)
+    t:SetTexture(0,0,0,0) -- invisible click blocker
+    blocker:Hide()
+  end
+  local function ShowBlocker()
+    EnsureBlocker()
+    if ed and ed.edit and ed.edit.ClearFocus then ed.edit:ClearFocus() end
+    if titleBox and titleBox.ClearFocus then titleBox:ClearFocus() end
+    blocker:Show()
+  end
+  local function HideBlocker()
+    if blocker then blocker:Hide() end
+  end
+  EnsureBlocker()
+
+  -- pending actions for unsaved popup flows
+  local pendingRaidSwitch = nil
+  local pendingNoteSwitch = nil
+  local pendingNoteIsNew  = false
+  local pendingDeleteId   = nil
 
   -- ==== Title ====
   local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -108,13 +170,114 @@ function Note.BuildNoteEditorPane(parent)
   tabs:SetPoint("TOPRIGHT", 0, -26)
   tabs:SetHeight(24)
 
+  -- Forward decl for New creation path
+  local CreateAndSelectNewNote
+
+  -- Switch helpers
+  local function SwitchRaid(targetRaid, doSave)
+    if doSave and IsDirty() and SaveCurrent then SaveCurrent() end
+    currentRaid = targetRaid
+    uiSV.selectedRaid = targetRaid
+    currentId = nil
+    if RebuildList then RebuildList() end
+    if LoadSelected then LoadSelected(nil) end
+  end
+
+  local function SwitchNote(targetId, doSave, isNew)
+    if doSave and IsDirty() and SaveCurrent then SaveCurrent() end
+    if isNew then
+      if CreateAndSelectNewNote then CreateAndSelectNewNote() end
+    else
+      if LoadSelected then LoadSelected(targetId) end
+    end
+  end
+
+  -- Popups (1.12-safe)
   StaticPopupDialogs = StaticPopupDialogs or {}
+
   StaticPopupDialogs["FRT_UNSAVED_SWITCHRAID"] = {
     text = "You have unsaved changes. Save before switching raid?",
     button1 = "Save",
     button2 = "Discard",
-    OnAccept = function() if SaveCurrent then SaveCurrent() end end,
-    OnCancel = function() end,
+    OnAccept = function()
+      if pendingRaidSwitch then
+        SwitchRaid(pendingRaidSwitch, true)
+        pendingRaidSwitch = nil
+      end
+      HideBlocker()
+    end,
+    OnCancel = function()
+      if pendingRaidSwitch then
+        SwitchRaid(pendingRaidSwitch, false)
+        pendingRaidSwitch = nil
+      end
+      HideBlocker()
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
+  }
+
+  StaticPopupDialogs["FRT_UNSAVED_SWITCHNOTE"] = {
+    text = "You have unsaved changes. Save before switching note?",
+    button1 = "Save",
+    button2 = "Discard",
+    OnAccept = function()
+      if pendingNoteIsNew then
+        if IsDirty() and SaveCurrent then SaveCurrent() end
+        if CreateAndSelectNewNote then CreateAndSelectNewNote() end
+      else
+        SwitchNote(pendingNoteSwitch, true, false)
+      end
+      pendingNoteSwitch = nil
+      pendingNoteIsNew  = false
+      HideBlocker()
+    end,
+    OnCancel = function()
+      if pendingNoteIsNew then
+        if CreateAndSelectNewNote then CreateAndSelectNewNote() end
+      else
+        SwitchNote(pendingNoteSwitch, false, false)
+      end
+      pendingNoteSwitch = nil
+      pendingNoteIsNew  = false
+      HideBlocker()
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
+  }
+
+  StaticPopupDialogs["FRT_CONFIRM_DELETE_NOTE"] = {
+    text = "Delete note: |cffffff00%s|r?\n|cffff4040This cannot be undone.|r",
+    button1 = "Delete",
+    button2 = "Cancel",
+    OnAccept = function()
+      if pendingDeleteId then
+        local deleted, delIndex = FindNoteById(pendingDeleteId)
+        if delIndex then
+          table.remove(FRT_Saved.notes, delIndex)
+          FRT.Print("Note deleted.")
+          -- pick neighbor in current raid
+          local notes = NotesForRaid(currentRaid)
+          if table.getn(notes) > 0 then
+            -- choose the item at the same index (now points to next). If index is past end, pick last.
+            local pick = notes[delIndex]
+            if not pick then pick = notes[table.getn(notes)] end
+            currentId = pick.id; uiSV.selectedId = pick.id
+            RebuildList()
+            LoadSelected(pick.id)
+          else
+            currentId = nil; uiSV.selectedId = nil
+            RebuildList()
+            LoadSelected(nil) -- will disable the editor
+          end
+          if UpdateButtonsState then UpdateButtonsState() end
+        end
+        pendingDeleteId = nil
+      end
+      HideBlocker()
+    end,
+    OnCancel = function()
+      pendingDeleteId = nil
+      HideBlocker()
+    end,
     timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
   }
 
@@ -132,19 +295,12 @@ function Note.BuildNoteEditorPane(parent)
       if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("LEFT", 0, 0) end
       b:SetText(rname)
       b:SetScript("OnClick", function()
-        if dirty then
+        if IsDirty() then
+          pendingRaidSwitch = rname
+          ShowBlocker()
           StaticPopup_Show("FRT_UNSAVED_SWITCHRAID")
-          local f = CreateFrame("Frame")
-          f:SetScript("OnUpdate", function()
-            f:SetScript("OnUpdate", nil)
-            currentRaid = rname; uiSV.selectedRaid = rname; currentId = nil
-            if RebuildList then RebuildList() end
-            if LoadSelected then LoadSelected(nil) end
-          end)
         else
-          currentRaid = rname; uiSV.selectedRaid = rname; currentId = nil
-          if RebuildList then RebuildList() end
-          if LoadSelected then LoadSelected(nil) end
+          SwitchRaid(rname, false)
         end
       end)
       raidButtons[rname] = b
@@ -155,7 +311,7 @@ function Note.BuildNoteEditorPane(parent)
   -- ==== Left: Note list ====
   local left = CreateFrame("Frame", "FRT_NoteList", parent)
   left:SetPoint("TOPLEFT", 0, -52)
-  left:SetPoint("BOTTOMLEFT", 0, 28) -- leave room for bottom button bar
+  left:SetPoint("BOTTOMLEFT", 0, 28)
   left:SetWidth(220)
   left:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -186,6 +342,22 @@ function Note.BuildNoteEditorPane(parent)
     listButtons = {}
   end
 
+  -- selection updater
+  local function UpdateListSelection()
+    for i=1, table.getn(listButtons) do
+      local b = listButtons[i]
+      if b and b.fs and b.id then
+        if currentId and b.id == currentId then
+          b:LockHighlight()
+          if b.fs.SetFontObject then b.fs:SetFontObject(GameFontHighlight) end
+        else
+          b:UnlockHighlight()
+          if b.fs.SetFontObject then b.fs:SetFontObject(GameFontNormal) end
+        end
+      end
+    end
+  end
+
   local function MakeItem(parentFrame, y, text, id, isBossHeader)
     local btn = CreateFrame("Button", nil, parentFrame)
     btn:SetPoint("TOPLEFT", 0, y)
@@ -201,7 +373,17 @@ function Note.BuildNoteEditorPane(parent)
       btn.fs = fs
       btn.id = id
       btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
-      btn:SetScript("OnClick", function() if LoadSelected then LoadSelected(btn.id) end end)
+      btn:SetScript("OnClick", function()
+        local targetId = id
+        if IsDirty() then
+          pendingNoteSwitch = targetId
+          pendingNoteIsNew  = false
+          ShowBlocker()
+          StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+        else
+          SwitchNote(targetId, false, false)
+        end
+      end)
     end
     table.insert(listButtons, btn)
     return btn
@@ -229,6 +411,7 @@ function Note.BuildNoteEditorPane(parent)
     end
     listChild:SetHeight(-y + 4)
     listChild:SetWidth(180)
+    UpdateListSelection()
   end
 
   -- ==== Bottom bar ====
@@ -245,23 +428,50 @@ function Note.BuildNoteEditorPane(parent)
   divider:SetVertexColor(1,1,1,0.10)
 
   -- ==== Right: Editor ====
-  local right = CreateFrame("Frame", "FRT_NoteEditorPane", parent)
+  right = CreateFrame("Frame", "FRT_NoteEditorPane", parent)
   right:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
-  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14) -- anchor above bottom bar
+  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14)
+
+  -- Disabled overlay (blocks interaction when no selection)
+  rightOverlay = CreateFrame("Frame", nil, right)
+  rightOverlay:SetAllPoints(right)
+  rightOverlay:EnableMouse(true)
+  rightOverlay:SetFrameStrata("DIALOG")
+  rightOverlay:SetFrameLevel((right:GetFrameLevel() or 0) + 100)
+  local rtex = rightOverlay:CreateTexture(nil, "BACKGROUND")
+  rtex:SetAllPoints(rightOverlay)
+  rtex:SetTexture(0,0,0,0.35)
+  rightOverlayMsg = rightOverlay:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+  rightOverlayMsg:SetPoint("CENTER", 0, 0)
+  rightOverlayMsg:SetText("No note selected")
+  rightOverlay:Hide()
+
+  local function SetEditorEnabled(flag)
+    editorEnabled = flag and true or false
+    if not editorEnabled then
+      if titleBox and titleBox.ClearFocus then titleBox:ClearFocus() end
+      if ed and ed.edit and ed.edit.ClearFocus then ed.edit:ClearFocus() end
+      rightOverlay:Show()
+    else
+      rightOverlay:Hide()
+    end
+    if UpdateButtonsState then UpdateButtonsState() end
+  end
 
   -- Boss row
   local bossLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   bossLabel:SetPoint("TOPLEFT", 0, 0); bossLabel:SetText("Boss:")
 
-  local bossBtn = CreateFrame("Button", "FRT_NoteEditor_BossBtn", right, "UIPanelButtonTemplate")
+  bossBtn = CreateFrame("Button", "FRT_NoteEditor_BossBtn", right, "UIPanelButtonTemplate")
   bossBtn:SetPoint("LEFT", bossLabel, "RIGHT", 6, 0)
   bossBtn:SetWidth(160); bossBtn:SetHeight(20)
   bossBtn:SetText("General")
   currentBoss = "General"
   bossBtn:SetScript("OnClick", function()
+    if not editorEnabled then return end
     currentBoss = NextBoss(currentRaid, currentBoss or "General")
     bossBtn:SetText(currentBoss)
-    dirty = true
+    UpdateDirtyFromUserEdit()
   end)
 
   -- Title row
@@ -269,11 +479,14 @@ function Note.BuildNoteEditorPane(parent)
   titleLabel:SetPoint("TOPLEFT", bossLabel, "BOTTOMLEFT", 0, -8)
   titleLabel:SetText("Title:")
 
-  local titleBox = CreateFrame("EditBox", "FRT_NoteEditor_TitleBox", right, "InputBoxTemplate")
+  titleBox = CreateFrame("EditBox", "FRT_NoteEditor_TitleBox", right, "InputBoxTemplate")
   titleBox:SetAutoFocus(false); titleBox:SetHeight(20); titleBox:SetWidth(260)
   titleBox:SetPoint("LEFT", titleLabel, "RIGHT", 6, 0)
   titleBox:SetText("")
-  titleBox:SetScript("OnTextChanged", function() dirty = true end)
+  titleBox:SetScript("OnTextChanged", function()
+    if not editorEnabled then return end
+    UpdateDirtyFromUserEdit()
+  end)
 
   -- Marker toolbar
   local toolbar = CreateFrame("Frame", "FRT_NoteEditor_Toolbar", right)
@@ -300,25 +513,58 @@ function Note.BuildNoteEditorPane(parent)
   end
   do
     local lastIcon
-    for i=1,8 do lastIcon = MakeMarkerButton(toolbar, i, lastIcon, 2) end
+    for i=1,8 do
+      lastIcon = MakeMarkerButton(toolbar, i, lastIcon, 2)
+      lastIcon:SetScript("OnClick", function()
+        if not editorEnabled then return end
+        local idx = lastIcon._rtIndex or 1
+        if not ed or not ed.edit or not ed.edit.Insert then return end
+        ed.edit:SetFocus()
+        ed.edit:Insert(string.format("{rt%d}", idx))
+        if ed.Refresh then ed.Refresh() end
+        UpdatePreviewFromEditor()
+        UpdateDirtyFromUserEdit()
+      end)
+    end
   end
 
-  -- Text editor (scrollable) — above bottom bar
+  -- Text editor (scrollable)
   local editArea = CreateFrame("Frame", nil, right)
   editArea:SetPoint("TOPLEFT", toolbar, "BOTTOMLEFT", 0, -8)
   editArea:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", 0, -8)
 
-  local ed = FRT.Utils.CreateScrollableEdit(editArea, {
-    name             = "FRT_NoteEditor_Scroll",
-    rightColumnWidth = 20,
-    padding          = 4,
-    minHeight        = 200,
-    insets           = { left=4, right=4, top=4, bottom=4 },
-    fontObject       = "ChatFontNormal",
-    background       = "Interface\\ChatFrame\\ChatFrameBackground",
-    border           = "Interface\\Tooltips\\UI-Tooltip-Border",
-    readonly         = false,
-  })
+  local function CreateScrollableEdit_Fallback(parentFrame)
+    local s = CreateFrame("ScrollFrame", nil, parentFrame, "UIPanelScrollFrameTemplate")
+    s:SetPoint("TOPLEFT", 0, 0); s:SetPoint("BOTTOMRIGHT", 0, 0)
+    local eb = CreateFrame("EditBox", nil, s)
+    eb:SetMultiLine(true); eb:SetAutoFocus(false)
+    eb:SetFontObject(ChatFontNormal)
+    eb:SetWidth(parentFrame:GetWidth() - 24)
+    eb:SetText("")
+    s:SetScrollChild(eb)
+    return {
+      edit = eb,
+      GetText = function() return eb:GetText() end,
+      SetText = function(t) eb:SetText(t or "") end,
+      Refresh = function() end,
+    }
+  end
+
+  if FRT and FRT.Utils and FRT.Utils.CreateScrollableEdit then
+    ed = FRT.Utils.CreateScrollableEdit(editArea, {
+      name             = "FRT_NoteEditor_Scroll",
+      rightColumnWidth = 20,
+      padding          = 4,
+      minHeight        = 200,
+      insets           = { left=4, right=4, top=4, bottom=4 },
+      fontObject       = "ChatFontNormal",
+      background       = "Interface\\ChatFrame\\ChatFrameBackground",
+      border           = "Interface\\Tooltips\\UI-Tooltip-Border",
+      readonly         = false,
+    })
+  else
+    ed = CreateScrollableEdit_Fallback(editArea)
+  end
 
   -- Live preview helpers
   local function EnsureViewerVisible()
@@ -339,28 +585,26 @@ function Note.BuildNoteEditorPane(parent)
 
   if ed and ed.edit and ed.edit.SetScript then
     ed.edit:SetScript("OnTextChanged", function()
-      dirty = true
+      if not editorEnabled then return end
       UpdatePreviewFromEditor()
       if ed.Refresh then ed.Refresh() end
+      UpdateDirtyFromUserEdit()
     end)
   end
 
-  local function InsertMarker(rtIndex)
-    if not ed or not ed.edit or not ed.edit.Insert then return end
-    ed.edit:SetFocus()
-    ed.edit:Insert(string.format("{rt%d}", rtIndex))
-    if ed.Refresh then ed.Refresh() end
-    dirty = true
-    UpdatePreviewFromEditor()
-  end
-  do
-    for _,child in pairs({ toolbar:GetChildren() }) do
-      if child and child._rtIndex then
-        child:SetScript("OnClick", function()
-          InsertMarker((this and this._rtIndex) or 1)
-        end)
-      end
-    end
+  -- Helper: create & select a new note immediately (default title)
+  CreateAndSelectNewNote = function()
+    local now = GetTime()
+    currentBoss = (BossList(currentRaid)[1]) or "General"
+    local new = {
+      id = genId(), raid = currentRaid, boss = currentBoss,
+      title = "New Note", text = "", created = now, modified = now,
+    }
+    table.insert(FRT_Saved.notes, new)
+    currentId = new.id; uiSV.selectedId = new.id
+    RebuildList()
+    LoadSelected(new.id)  -- sets baseline, updates selection highlight & buttons, enables editor
+    FRT.Print("New note created.")
   end
 
   -- ================
@@ -369,6 +613,7 @@ function Note.BuildNoteEditorPane(parent)
   LoadSelected = function(id)
     currentId = id
     uiSV.selectedId = id
+    BeginSquelch()
     local n = id and FindNoteById(id) or nil
     if n then
       currentRaid = n.raid or currentRaid
@@ -376,16 +621,22 @@ function Note.BuildNoteEditorPane(parent)
       bossBtn:SetText(currentBoss)
       if titleBox and titleBox.SetText then titleBox:SetText(n.title or "") end
       ed.SetText(n.text or "")
+      SetEditorEnabled(true)
     else
-      currentBoss = (BossList(currentRaid)[1]) or "General"
-      bossBtn:SetText(currentBoss)
+      -- no selection: show empty, disable editor, clear baseline so no dirty prompts
+      bossBtn:SetText((BossList(currentRaid)[1]) or "General")
       if titleBox and titleBox.SetText then titleBox:SetText("") end
       ed.SetText("")
+      SetEditorEnabled(false)
+      baseline = nil
     end
-    dirty = false
-    UpdatePreviewFromEditor()
-    -- share state may change due to text programmatically set
-    if UpdateShareButtonState then UpdateShareButtonState() end
+    EndSquelch()
+    if editorEnabled then
+      SnapBaseline()
+      UpdatePreviewFromEditor()
+    end
+    if UpdateButtonsState then UpdateButtonsState() end
+    UpdateListSelection()
   end
 
   local function GatherEditor()
@@ -395,6 +646,7 @@ function Note.BuildNoteEditorPane(parent)
   end
 
   SaveCurrent = function()
+    if not editorEnabled then return end
     local data = GatherEditor()
     local now  = GetTime()
     if currentId then
@@ -412,12 +664,14 @@ function Note.BuildNoteEditorPane(parent)
       currentId = new.id; uiSV.selectedId = new.id
     end
     FRT.Print("Note saved.")
-    dirty = false
+    SnapBaseline()
     RebuildList()
-    if UpdateShareButtonState then UpdateShareButtonState() end
+    if UpdateButtonsState then UpdateButtonsState() end
+    UpdateListSelection()
   end
 
   local function SaveAs()
+    if not editorEnabled then return end
     local data = GatherEditor()
     local now  = GetTime()
     local copy = {
@@ -427,42 +681,53 @@ function Note.BuildNoteEditorPane(parent)
     table.insert(FRT_Saved.notes, copy)
     currentId = copy.id; uiSV.selectedId = copy.id
     FRT.Print("Note saved as new.")
-    dirty = false
+    SnapBaseline()
     RebuildList()
-    if UpdateShareButtonState then UpdateShareButtonState() end
+    if UpdateButtonsState then UpdateButtonsState() end
+    LoadSelected(copy.id)
   end
 
   local function NewNote()
-    currentId = nil; uiSV.selectedId = nil
-    currentBoss = (BossList(currentRaid)[1]) or "General"
-    bossBtn:SetText(currentBoss)
-    if titleBox and titleBox.SetText then titleBox:SetText("") end
-    ed.SetText("")
-    dirty = true
-    UpdatePreviewFromEditor()
-    if UpdateShareButtonState then UpdateShareButtonState() end
+    if IsDirty() then
+      pendingNoteSwitch = nil
+      pendingNoteIsNew  = true
+      ShowBlocker()
+      StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+    else
+      CreateAndSelectNewNote()
+    end
   end
 
   local function DeleteNote()
     if not currentId then FRT.Print("No note selected."); return end
-    local _, idx = FindNoteById(currentId)
-    if not idx then return end
-    table.remove(FRT_Saved.notes, idx)
-    FRT.Print("Note deleted.")
-    currentId = nil; uiSV.selectedId = nil
-    RebuildList()
-    LoadSelected(nil)
-    if UpdateShareButtonState then UpdateShareButtonState() end
+    pendingDeleteId = currentId
+    local n = FindNoteById(currentId)
+    local ttl = (n and n.title and n.title ~= "" and n.title) and n.title or "(untitled)"
+    ShowBlocker()
+    StaticPopup_Show("FRT_CONFIRM_DELETE_NOTE", ttl)
+  end
+
+  local function CanShareNow()
+    if not editorEnabled then return false end
+    if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
+    local txt = (ed and ed.GetText and ed.GetText()) or ""
+    if txt == "" then return false end
+    if FRT.IsInRaid and FRT.IsInRaid() then
+      return (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) and true or false
+    end
+    if (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0 then return true end
+    if IsInGuild and IsInGuild() then return true end
+    return false
   end
 
   local function ShareCurrent()
+    if not editorEnabled then return end
     local data = GatherEditor()
     if data.text == "" then FRT.Print("Nothing to share."); return end
     if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then
       FRT.Print("Sharing unavailable (NoteNet not loaded)."); return
     end
     if (GetNumRaidMembers() or 0) > 0 then
-      -- In raid, your gating should already have ensured leader/assist; still safe to try
       FRT.NoteNet.Send(data.text, "RAID");  FRT.Print("Shared to RAID.")
     elseif (GetNumPartyMembers() or 0) > 0 then
       FRT.NoteNet.Send(data.text, "PARTY"); FRT.Print("Shared to PARTY.")
@@ -474,90 +739,79 @@ function Note.BuildNoteEditorPane(parent)
   end
 
   -- =========================
-  -- Share button + state
+  -- Buttons + state
   -- =========================
-  local btnNew   = CreateFrame("Button", "FRT_NoteBtn_New", bottomBar, "UIPanelButtonTemplate")
-  local btnDup   = CreateFrame("Button", "FRT_NoteBtn_Dup", bottomBar, "UIPanelButtonTemplate")
-  local btnDel   = CreateFrame("Button", "FRT_NoteBtn_Del", bottomBar, "UIPanelButtonTemplate")
-  local btnSave  = CreateFrame("Button", "FRT_NoteBtn_Save", bottomBar, "UIPanelButtonTemplate")
-  local btnSaveAs= CreateFrame("Button", "FRT_NoteBtn_SaveAs", bottomBar, "UIPanelButtonTemplate")
-  local btnShare  = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
+  btnNew    = CreateFrame("Button", "FRT_NoteBtn_New", bottomBar, "UIPanelButtonTemplate")
+  btnDup    = CreateFrame("Button", "FRT_NoteBtn_Dup", bottomBar, "UIPanelButtonTemplate")
+  btnDel    = CreateFrame("Button", "FRT_NoteBtn_Del", bottomBar, "UIPanelButtonTemplate")
+  btnSave   = CreateFrame("Button", "FRT_NoteBtn_Save", bottomBar, "UIPanelButtonTemplate")
+  btnShare  = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
 
-  local function CanShareNow()
-    -- must have NoteNet and some text
-    if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
-    local txt = (ed and ed.GetText and ed.GetText()) or ""
-    if txt == "" then return false end
-
-    -- In raid: only leader/assistant
-    if FRT.IsInRaid and FRT.IsInRaid() then
-      return (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) and true or false
-    end
-
-    -- Outside raid: allow party or guild
-    if (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0 then return true end
-    if IsInGuild and IsInGuild() then return true end
-    return false
+  UpdateButtonsState = function()
+    -- Save
+    if btnSave then if editorEnabled and IsDirty() then btnSave:Enable() else btnSave:Disable() end end
+    --Duplicate
+    if btnDup then if editorEnabled then btnDup:Enable() else btnDup:Disable() end end
+    -- Delete
+    if btnDel then if editorEnabled then btnDel:Enable() else btnDel:Disable() end end
+    -- Share
+    if btnShare then if CanShareNow() then btnShare:Enable() else btnShare:Disable() end end
+    -- New is always enabled (no gating)
   end
 
-  local function UpdateShareButtonState()
-    if not btnShare then return end
-    if CanShareNow() then btnShare:Enable() else btnShare:Disable() end
-  end
+  UpdateShareButtonState = function() UpdateButtonsState() end
 
   -- layout bottom buttons
+  btnNew:SetWidth(80);   btnNew:SetHeight(22);   btnNew:SetPoint("LEFT", 0, 0);                         btnNew:SetText("New")
+  btnDup:SetWidth(80);   btnDup:SetHeight(22);   btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);        btnDup:SetText("Duplicate")
+  btnDel:SetWidth(80);   btnDel:SetHeight(22);   btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);        btnDel:SetText("Delete")
 
-  btnNew:SetWidth(80);  btnNew:SetHeight(22);  btnNew:SetPoint("LEFT", 0, 0);                   btnNew:SetText("New")
-  btnDup:SetWidth(80);  btnDup:SetHeight(22);  btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);  btnDup:SetText("Duplicate")
-  btnDel:SetWidth(80);  btnDel:SetHeight(22);  btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);  btnDel:SetText("Delete")
-  btnShare:SetWidth(80);btnShare:SetHeight(22);btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
-  btnSaveAs:SetWidth(80);btnSaveAs:SetHeight(22);btnSaveAs:SetPoint("RIGHT", btnShare, "LEFT", -6, 0); btnSaveAs:SetText("Save As")
-  btnSave:SetWidth(80); btnSave:SetHeight(22); btnSave:SetPoint("RIGHT", btnSaveAs, "LEFT", -6, 0);   btnSave:SetText("Save")
+  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
+  btnSave:SetWidth(80);  btnSave:SetHeight(22);  btnSave:SetPoint("RIGHT", btnShare, "LEFT", -6, 0);    btnSave:SetText("Save")
 
-  UpdateShareButtonState()
+  -- wire
+  btnNew:SetScript("OnClick", NewNote)
+  btnDup:SetScript("OnClick", SaveAs)
+  btnDel:SetScript("OnClick", DeleteNote)
+  btnSave:SetScript("OnClick", function()
+    if not editorEnabled then return end
+    if titleBox and titleBox.ClearFocus then titleBox:ClearFocus() end
+    if ed and ed.edit and ed.edit.ClearFocus then ed.edit:ClearFocus() end
+    SaveCurrent()
+  end)
+  btnShare:SetScript("OnClick", ShareCurrent)
 
-  -- ========== Event watcher (no varargs) ==========
+  -- ========== Event watcher ==========
   local watch = CreateFrame("Frame", nil, bottomBar)
   watch:RegisterEvent("PLAYER_ENTERING_WORLD")
   watch:RegisterEvent("PARTY_MEMBERS_CHANGED")
   watch:RegisterEvent("PARTY_LEADER_CHANGED")
   watch:RegisterEvent("RAID_ROSTER_UPDATE")
   watch:RegisterEvent("GUILD_ROSTER_UPDATE")
-  watch:SetScript("OnEvent", function()
-    UpdateShareButtonState()
-  end)
+  watch:SetScript("OnEvent", function() if UpdateButtonsState then UpdateButtonsState() end end)
 
-
-  -- ========== Edit box changed (Lua 5.0: no '...') ==========
-  if ed and ed.edit and ed.edit.SetScript then
-    ed.edit:SetScript("OnTextChanged", function()
-      dirty = true
-      UpdatePreviewFromEditor()
-      if ed.Refresh then ed.Refresh() end
-      UpdateShareButtonState()
-    end)
-  end
-
-  -- Wire buttons
-  btnNew:SetScript("OnClick", NewNote)
-  btnDup:SetScript("OnClick", SaveAs)
-  btnDel:SetScript("OnClick", DeleteNote)
-  btnSave:SetScript("OnClick", SaveCurrent)
-  btnSaveAs:SetScript("OnClick", SaveAs)
-  btnShare:SetScript("OnClick", ShareCurrent)
+  -- Initial state
+  UpdateButtonsState()
 
   -- Initial build
   RebuildRaidTabsLocal()
   RebuildList()
   if currentId and FindNoteById(currentId) then
     LoadSelected(currentId)
+    -- warm-up static popup to avoid first-use hitch
+    local w = CreateFrame("Frame", nil, parent)
+    w:SetScript("OnUpdate", function()
+      w:SetScript("OnUpdate", nil)
+      local popup = StaticPopup_Show("FRT_CONFIRM_DELETE_NOTE", "warmup")
+      if popup then popup:Hide() end
+      StaticPopup_Hide("FRT_CONFIRM_DELETE_NOTE")
+    end)
   else
-    LoadSelected(nil)
+    LoadSelected(nil) -- will disable editor
   end
 end
 
-function Note.ShowEditor(mod)
-  -- Only restrict when in a raid
+function Note.ShowEditor()
   if FRT.IsInRaid and FRT.IsInRaid() and not (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) then
     FRT.Print("Editor requires raid lead or assist.")
     return
