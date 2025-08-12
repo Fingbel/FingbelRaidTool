@@ -1,6 +1,4 @@
 -- Fingbel Raid Tool - Note Editor Pane (Vanilla 1.12 / Lua 5.0)
--- Uses nicknames from FRT_RaidData.lua for raid tab buttons
--- Raid tab order follows FRT.RaidBosses._order; "Custom/Misc" is always placed last.
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
@@ -14,26 +12,18 @@ local function EnsureSaved()
   FRT_Saved.notes = FRT_Saved.notes or {}   -- array of { id, raid, boss, title, text, created, modified }
   FRT_Saved.ui = FRT_Saved.ui or {}
   FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil }
+  FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {} -- raid -> "All" | boss
 end
 
--- Build an ordered raid list:
--- - If FRT.RaidBosses._order exists (array), follow it exactly (only include keys that actually exist)
--- - Append any remaining raid keys not in _order (before Misc)
--- - Ensure "Custom/Misc" exists and is placed last
+-- Build an ordered raid list
 local function RaidList()
-  local raids = {}
-  local RB = FRT.RaidBosses
-
+  local raids, RB = {}, FRT.RaidBosses
   if RB then
-    -- 1) Use _order if present
     if type(RB._order) == "table" and table.getn(RB._order) > 0 then
       for i = 1, table.getn(RB._order) do
         local rname = RB._order[i]
-        if rname and RB[rname] and rname ~= "_order" then
-          table.insert(raids, rname)
-        end
+        if rname and RB[rname] and rname ~= "_order" then table.insert(raids, rname) end
       end
-      -- 2) Add any missing keys not listed in _order (unordered; pairs)
       for k,_ in pairs(RB) do
         if k ~= "_order" then
           local found = false
@@ -42,24 +32,15 @@ local function RaidList()
         end
       end
     else
-      -- Fallback: collect keys (excluding _order) and sort alphabetically
       for k,_ in pairs(RB) do if k ~= "_order" then table.insert(raids, k) end end
       table.sort(raids)
     end
   end
-
-  -- 3) Move/ensure "Custom/Misc" last
   local misc = "Custom/Misc"
-  local hasMisc = false
-  local miscIdx = nil
-  for i=1, table.getn(raids) do
-    if raids[i] == misc then hasMisc = true; miscIdx = i; break end
-  end
+  local miscIdx
+  for i=1, table.getn(raids) do if raids[i] == misc then miscIdx = i; break end end
   if miscIdx then table.remove(raids, miscIdx) end
-  if (not RB) or RB[misc] then
-    table.insert(raids, misc)
-  end
-
+  if (not RB) or RB[misc] then table.insert(raids, misc) end
   return raids
 end
 
@@ -72,19 +53,10 @@ end
 local function BossList(raid)
   local entry = FRT.RaidBosses and FRT.RaidBosses[raid]
   if entry then
-    if type(entry) == "table" and entry.bosses then
-      return entry.bosses
-    elseif type(entry) == "table" then
-      -- backward compatibility if someone still provides a plain array
-      return entry
-    end
+    if type(entry) == "table" and entry.bosses then return entry.bosses
+    elseif type(entry) == "table" then return entry end -- plain array fallback
   end
   return { "General" }
-end
-
-local function FirstBoss(raid)
-  local bl = BossList(raid)
-  return (bl and bl[1]) and bl[1] or "General"
 end
 
 local function GetRaidNick(raid)
@@ -99,23 +71,6 @@ local function GetRaidFullName(raid)
   return raid
 end
 
-local function BossOrderIndex(raid, boss)
-  local list = BossList(raid)
-  for i=1, table.getn(list) do
-    if list[i] == boss then return i end
-  end
-  return 999
-end
-
-local function NextBoss(raid, current)
-  local list = BossList(raid)
-  local n = table.getn(list)
-  if n == 0 then return current end
-  local idx = BossOrderIndex(raid, current); if idx > n then idx = n end
-  idx = idx + 1; if idx > n then idx = 1 end
-  return list[idx]
-end
-
 local function genId()
   local base = math.mod(math.floor(GetTime() * 1000), 100000000)
   return tostring(base) .. tostring(math.random(100,999))
@@ -128,14 +83,6 @@ local function NotesForRaid(raid)
     local n = arr[i]
     if n and n.raid == raid then table.insert(out, n) end
   end
-  table.sort(out, function(a,b)
-    local ai = BossOrderIndex(raid, a.boss or "")
-    local bi = BossOrderIndex(raid, b.boss or "")
-    if ai ~= bi then return ai < bi end
-    local at = string.lower(a.title or "")
-    local bt = string.lower(b.title or "")
-    return at < bt
-  end)
   return out
 end
 
@@ -148,6 +95,21 @@ local function FindNoteById(id)
   return nil
 end
 
+local function EnsureDropDownListFrames()
+  if not DropDownList1 then
+    if UIDropDownMenu_CreateFrames then
+      -- Args: maxLevels, maxButtons
+      UIDropDownMenu_CreateFrames(1, 1)
+    else
+      -- Fallback: toggle a throwaway dropdown to force list creation
+      local tmp = CreateFrame("Frame", nil, UIParent, "UIDropDownMenuTemplate")
+      ToggleDropDownMenu(1, nil, tmp)  -- open
+      ToggleDropDownMenu(1, nil, tmp)  -- close
+      tmp:Hide()
+    end
+  end
+end
+
 -- =========================
 -- UI builder
 -- =========================
@@ -156,22 +118,147 @@ function Note.BuildNoteEditorPane(parent)
 
   local uiSV  = FRT_Saved.ui.notes
 
-  -- Validate selected raid against data
+  -- Validate selected raid
   local selRaid = uiSV.selectedRaid or "Custom/Misc"
   if not (FRT.RaidBosses and FRT.RaidBosses[selRaid]) then
     selRaid = FirstRaidName()
     uiSV.selectedRaid = selRaid
   end
 
-  local currentRaid = selRaid
-  local currentId   = uiSV.selectedId or nil
-  local currentBoss = "General"
+  local currentRaid        = selRaid
+  local currentId          = uiSV.selectedId or nil
+  local currentBossFilter  = uiSV.selectedBossByRaid[currentRaid] or "All"  -- "All" or a boss name
+  local pendingBossFilter  = nil
+  local bossPicker, bossPickDD, bossPickValue
+  local ApplyBossFilter
+  local CreateAndSelectNewNote
 
-  -- forward locals for cross-calls + refs
+  local function ShowBossPicker()
+    if not bossPicker then
+      bossPicker = CreateFrame("Frame", "FRT_BossPicker", UIParent)
+      bossPicker:SetFrameStrata("DIALOG")
+      bossPicker:SetToplevel(true)
+      bossPicker:SetWidth(320); bossPicker:SetHeight(130)
+      bossPicker:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+      bossPicker:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets   = { left=4, right=4, top=4, bottom=4 }
+      })
+      bossPicker:SetBackdropColor(0,0,0,0.8)
+
+      local title = bossPicker:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+      title:SetPoint("TOP", 0, -10)
+      title:SetText("Select boss for new note")
+
+      local lbl = bossPicker:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+      lbl:SetPoint("TOPLEFT", 16, -40)
+      lbl:SetText("Boss:")
+
+      bossPickDD = CreateFrame("Frame", "FRT_BossPicker_DropDown", bossPicker, "UIDropDownMenuTemplate")
+      bossPickDD:SetPoint("LEFT", lbl, "RIGHT", -6, -2)
+      UIDropDownMenu_SetWidth(180, bossPickDD)  -- Vanilla order: (width, frame)
+      UIDropDownMenu_JustifyText("LEFT", bossPickDD)
+
+      local function ApplyPick(val)
+        bossPickValue = val
+        UIDropDownMenu_SetSelectedValue(bossPickDD, bossPickValue)
+        UIDropDownMenu_SetText(bossPickValue or "", bossPickDD)
+      end
+
+      local function InitPick()
+        local list = BossList(currentRaid)
+        for i=1, table.getn(list) do
+          local val = list[i]
+          local info = {}
+          info.text = val
+          info.value = val
+          info.func = function()
+            bossPickValue = val
+            UIDropDownMenu_SetSelectedValue(bossPickDD, bossPickValue)
+            UIDropDownMenu_SetText(bossPickValue or "", bossPickDD)
+          end
+          info.checked = (bossPickValue == val)
+          UIDropDownMenu_AddButton(info)  -- no level arg
+        end
+      end
+
+      UIDropDownMenu_Initialize(bossPickDD, InitPick)
+
+      local ok = CreateFrame("Button", nil, bossPicker, "UIPanelButtonTemplate")
+      ok:SetWidth(90); ok:SetHeight(22)
+      ok:SetPoint("BOTTOMRIGHT", -16, 14)
+      ok:SetText("Create")
+      ok:SetScript("OnClick", function()
+        if bossPickValue and bossPickValue ~= "" then
+          if bossPickValue ~= currentBossFilter then
+            ApplyBossFilter(bossPickValue)  -- <— one call does it all
+          end
+          bossPicker:Hide()
+          CreateAndSelectNewNote()
+        end
+      end)
+
+      local cancel = CreateFrame("Button", nil, bossPicker, "UIPanelButtonTemplate")
+      cancel:SetWidth(90); cancel:SetHeight(22)
+      cancel:SetPoint("RIGHT", ok, "LEFT", -6, 0)
+      cancel:SetText("Cancel")
+      cancel:SetScript("OnClick", function() bossPicker:Hide() end)
+
+      bossPicker:Hide()
+
+      -- helper to refresh choices each time we show
+      bossPicker._prepare = function()
+        EnsureDropDownListFrames()
+        local list = BossList(currentRaid)
+        bossPickValue = (table.getn(list) > 0) and list[1] or "General"
+        UIDropDownMenu_SetSelectedValue(bossPickDD, bossPickValue)
+        UIDropDownMenu_SetText(bossPickValue or "", bossPickDD)
+      end
+    end
+
+    bossPicker:_prepare()
+    bossPicker:Show()
+  end
+
+  -- Filter helper (sees currentRaid/currentBossFilter)
+  local function GetFilteredNotes()
+    local all = NotesForRaid(currentRaid)
+    if currentBossFilter == "All" then
+      local out = {}
+      for i=1, table.getn(all) do out[table.getn(out)+1] = all[i] end
+      table.sort(out, function(a,b)
+        local at = string.lower(a.title or ""); local bt = string.lower(b.title or "")
+        if at == bt then
+          return string.lower(a.boss or "") < string.lower(b.boss or "")
+        end
+        return at < bt
+      end)
+      return out
+    else
+      local out = {}
+      for i=1, table.getn(all) do
+        local n = all[i]
+        if n.boss == currentBossFilter then out[table.getn(out)+1] = n end
+      end
+      table.sort(out, function(a,b)
+        local at = string.lower(a.title or ""); local bt = string.lower(b.title or "")
+        return at < bt
+      end)
+      return out
+    end
+  end
+
+  -- forward locals
   local RebuildList, LoadSelected, SaveCurrent, UpdateShareButtonState
-  local bossBtn, titleBox, ed
+  local titleBox, ed
   local btnSave, btnShare, btnDup, btnDel, btnNew
   local UpdateButtonsState
+  local RebuildRaidTabsLocal
+  local RebuildBossFilterDropdown
+  local UpdatePreviewFromEditor
+  local bossInfoLabel
 
   -- editor enable/disable overlay
   local editorEnabled = false
@@ -186,14 +273,15 @@ function Note.BuildNoteEditorPane(parent)
   local function EditorSnapshot()
     local t = (ed and ed.GetText and (ed.GetText() or "")) or ""
     local ttl = (titleBox and titleBox.GetText and (titleBox:GetText() or "")) or ""
-    return { raid=currentRaid, boss=(currentBoss or "General"), title=ttl, text=t }
+    return { id = currentId, title = ttl, text = t }
   end
   local function SnapBaseline() baseline = EditorSnapshot() end
   local function IsDirty()
     if not editorEnabled then return false end
     if not baseline then return false end
     local cur = EditorSnapshot()
-    return not (cur.raid == baseline.raid and cur.boss == baseline.boss and cur.title == baseline.title and cur.text == baseline.text)
+    if cur.id ~= baseline.id then return false end
+    return not (cur.title == baseline.title and cur.text == baseline.text)
   end
   local function UpdateDirtyFromUserEdit()
     if suppressDirty > 0 then return end
@@ -238,8 +326,96 @@ function Note.BuildNoteEditorPane(parent)
   tabs:SetPoint("TOPRIGHT", 0, -26)
   tabs:SetHeight(24)
 
-  -- Forward decl
-  local CreateAndSelectNewNote
+  -- Boss Filter Bar (shared)
+  local filterBar = CreateFrame("Frame", "FRT_NoteFilterBar", parent)
+  filterBar:SetPoint("TOPLEFT", 0, -52)
+  filterBar:SetPoint("TOPRIGHT", 0, -52)
+  filterBar:SetHeight(22)
+
+  local bossFilterLabel = filterBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  bossFilterLabel:SetPoint("LEFT", 0, 0)
+  bossFilterLabel:SetText("Boss:")
+
+  local bossFilterDD = CreateFrame("Frame", "FRT_NoteFilter_BossDropDown", filterBar, "UIDropDownMenuTemplate")
+  bossFilterDD:SetPoint("LEFT", bossFilterLabel, "RIGHT", -6, 2)
+  UIDropDownMenu_SetWidth(160, bossFilterDD)      -- Vanilla order: (width, frame)
+  UIDropDownMenu_JustifyText("LEFT", bossFilterDD)
+
+  ApplyBossFilter = function(val)
+    currentBossFilter = val or "All"
+    uiSV.selectedBossByRaid[currentRaid] = currentBossFilter
+    UIDropDownMenu_SetSelectedValue(bossFilterDD, currentBossFilter)
+    UIDropDownMenu_SetText(currentBossFilter, bossFilterDD)
+
+    if RebuildList then RebuildList() end
+
+    local filtered = GetFilteredNotes()
+    if table.getn(filtered) == 0 then
+      currentId = nil; uiSV.selectedId = nil
+      LoadSelected(nil)          -- disabled editor
+    else
+      local found = false
+      for i=1, table.getn(filtered) do
+        if filtered[i].id == currentId then found = true; break end
+      end
+      if not found then
+        currentId = filtered[1].id; uiSV.selectedId = currentId
+        LoadSelected(currentId)  -- auto-select first entry
+      end
+    end
+    if UpdateButtonsState then UpdateButtonsState() end
+  end
+
+  local function InitBossFilterDropdown()
+    local info
+
+    info = {}
+    info.text = "All bosses"
+    info.value = "All"
+    info.func = function()
+      if IsDirty() then
+        pendingBossFilter = "All"
+        ShowBlocker()
+        StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+      else
+        ApplyBossFilter("All")
+      end
+    end
+    info.checked = (currentBossFilter == "All")
+    UIDropDownMenu_AddButton(info)  -- no level arg
+
+    local list = BossList(currentRaid)
+    for i=1, table.getn(list) do
+      local val = list[i]
+      info = {}
+      info.text = val
+      info.value = val
+      info.func = function()
+        if IsDirty() then
+          pendingBossFilter = val
+          ShowBlocker()
+          StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+        else
+          ApplyBossFilter(val)
+        end
+      end
+      info.checked = (currentBossFilter == val)
+      UIDropDownMenu_AddButton(info)  -- no level arg
+    end
+  end
+
+  RebuildBossFilterDropdown = function()
+    EnsureDropDownListFrames()
+    UIDropDownMenu_Initialize(bossFilterDD, InitBossFilterDropdown)
+    -- validate currentBossFilter against raid bosses
+    local valid = (currentBossFilter == "All")
+    if not valid then
+      local list = BossList(currentRaid)
+      for i=1, table.getn(list) do if list[i] == currentBossFilter then valid = true; break end end
+    end
+    if not valid then currentBossFilter = "All" end
+    ApplyBossFilter(currentBossFilter)
+  end
 
   local function SwitchRaid(targetRaid, doSave)
     if doSave and IsDirty() and SaveCurrent then SaveCurrent() end
@@ -249,8 +425,22 @@ function Note.BuildNoteEditorPane(parent)
     currentRaid = targetRaid
     uiSV.selectedRaid = targetRaid
     currentId = nil
+
+    -- restore per-raid boss filter or default to All
+    currentBossFilter = uiSV.selectedBossByRaid[currentRaid] or "All"
+
+    if RebuildRaidTabsLocal then RebuildRaidTabsLocal() end
+    if RebuildBossFilterDropdown then RebuildBossFilterDropdown() end
     if RebuildList then RebuildList() end
-    if LoadSelected then LoadSelected(nil) end
+
+    local filtered = GetFilteredNotes()
+    if table.getn(filtered) == 0 then
+      currentId = nil; uiSV.selectedId = nil
+      LoadSelected(nil)                 -- disabled editor
+    else
+      currentId = filtered[1].id; uiSV.selectedId = currentId
+      LoadSelected(currentId)           -- auto-select first
+    end
   end
 
   local function SwitchNote(targetId, doSave, isNew)
@@ -287,28 +477,38 @@ function Note.BuildNoteEditorPane(parent)
   }
 
   StaticPopupDialogs["FRT_UNSAVED_SWITCHNOTE"] = {
-    text = "You have unsaved changes. Save before switching note?",
+    text = "You have unsaved changes. Save before changing selection?",
     button1 = "Save",
     button2 = "Discard",
     OnAccept = function()
+      if IsDirty() and SaveCurrent then SaveCurrent() end
       if pendingNoteIsNew then
-        if IsDirty() and SaveCurrent then SaveCurrent() end
-        if CreateAndSelectNewNote then CreateAndSelectNewNote() end
-      else
-        SwitchNote(pendingNoteSwitch, true, false)
+        if currentBossFilter == "All" then
+          ShowBossPicker()
+        else
+          if CreateAndSelectNewNote then CreateAndSelectNewNote() end
+        end
+      elseif pendingNoteSwitch then
+        SwitchNote(pendingNoteSwitch, false, false)
+      elseif pendingBossFilter then
+        ApplyBossFilter(pendingBossFilter)
       end
       pendingNoteSwitch = nil
       pendingNoteIsNew  = false
+      pendingBossFilter = nil
       HideBlocker()
     end,
     OnCancel = function()
       if pendingNoteIsNew then
         if CreateAndSelectNewNote then CreateAndSelectNewNote() end
-      else
+      elseif pendingNoteSwitch then
         SwitchNote(pendingNoteSwitch, false, false)
+      elseif pendingBossFilter then
+        ApplyBossFilter(pendingBossFilter)
       end
       pendingNoteSwitch = nil
       pendingNoteIsNew  = false
+      pendingBossFilter = nil
       HideBlocker()
     end,
     timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
@@ -320,22 +520,13 @@ function Note.BuildNoteEditorPane(parent)
     button2 = "Cancel",
     OnAccept = function()
       if pendingDeleteId then
-        local deleted, delIndex = FindNoteById(pendingDeleteId)
+        local _, delIndex = FindNoteById(pendingDeleteId)
         if delIndex then
           table.remove(FRT_Saved.notes, delIndex)
           FRT.Print("Note deleted.")
-          local notes = NotesForRaid(currentRaid)
-          if table.getn(notes) > 0 then
-            local pick = notes[delIndex]
-            if not pick then pick = notes[table.getn(notes)] end
-            currentId = pick.id; uiSV.selectedId = pick.id
-            RebuildList()
-            LoadSelected(pick.id)
-          else
-            currentId = nil; uiSV.selectedId = nil
-            RebuildList()
-            LoadSelected(nil)
-          end
+          currentId = nil; uiSV.selectedId = nil
+          if RebuildList then RebuildList() end
+          LoadSelected(nil)
           if UpdateButtonsState then UpdateButtonsState() end
         end
         pendingDeleteId = nil
@@ -349,33 +540,28 @@ function Note.BuildNoteEditorPane(parent)
     timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
   }
 
-  -- Build raid tabs using NICKNAMES for the labels, in RaidList() order
+  -- Build raid tabs using nicknames (in RaidList order)
   local raidButtons = {}
-  local function RebuildRaidTabsLocal()
+  RebuildRaidTabsLocal = function()
     for _,b in pairs(raidButtons) do b:Hide() end
     raidButtons = {}
     local raids = RaidList()
     local prev
     for i=1, table.getn(raids) do
-      local rname = raids[i]               -- full key
-      local nick  = GetRaidNick(rname)     -- button label
-      local full  = GetRaidFullName(rname) -- tooltip/full name
-
+      local rname = raids[i]
+      local nick  = GetRaidNick(rname)
+      local full  = GetRaidFullName(rname)
       local b = CreateFrame("Button", nil, tabs, "UIPanelButtonTemplate")
       b:SetHeight(20)
       b:SetWidth(math.max(60, string.len(nick) * 6 + 20))
       if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("LEFT", 0, 0) end
       b:SetText(nick)
-
       b:SetScript("OnEnter", function()
         if full ~= nick and GameTooltip then
-          GameTooltip:SetOwner(b, "ANCHOR_TOP")
-          GameTooltip:SetText(full, 1,1,1)
-          GameTooltip:Show()
+          GameTooltip:SetOwner(b, "ANCHOR_TOP"); GameTooltip:SetText(full, 1,1,1); GameTooltip:Show()
         end
       end)
       b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-
       b:SetScript("OnClick", function()
         if IsDirty() then
           pendingRaidSwitch = rname
@@ -390,9 +576,30 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
-  -- ==== Left: Note list ====
+  -- ==== Header above the list background ====
+  local listHeaderBar = CreateFrame("Frame", "FRT_NoteListHeader", parent)
+  listHeaderBar:SetPoint("TOPLEFT", 0, -78)      -- below filter bar
+  listHeaderBar:SetWidth(220)
+  listHeaderBar:SetHeight(18)
+
+  local listHeader = listHeaderBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  listHeader:SetPoint("LEFT", listHeaderBar, "LEFT", 2, 0)
+  listHeader:SetText("Notes for:")
+
+  local listRaidName = listHeaderBar:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  listRaidName:SetPoint("LEFT", listHeader, "RIGHT", 6, 0)
+  listRaidName:SetText(GetRaidFullName(currentRaid))
+
+  local underline = listHeaderBar:CreateTexture(nil, "BACKGROUND")
+  underline:SetPoint("BOTTOMLEFT", listHeaderBar, "BOTTOMLEFT", 0, 0)
+  underline:SetPoint("BOTTOMRIGHT", listHeaderBar, "BOTTOMRIGHT", 0, 0)
+  underline:SetHeight(1)
+  underline:SetTexture("Interface\\Buttons\\WHITE8x8")
+  underline:SetVertexColor(1, 1, 1, 0.10)
+
+  -- ==== Left: Note list (with backdrop) ====
   local left = CreateFrame("Frame", "FRT_NoteList", parent)
-  left:SetPoint("TOPLEFT", 0, -52)
+  left:SetPoint("TOPLEFT", listHeaderBar, "BOTTOMLEFT", 0, -2)
   left:SetPoint("BOTTOMLEFT", 0, 28)
   left:SetWidth(220)
   left:SetBackdrop({
@@ -403,16 +610,8 @@ function Note.BuildNoteEditorPane(parent)
   })
   left:SetBackdropColor(0,0,0,0.4)
 
-  local listHeader = left:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  listHeader:SetPoint("TOPLEFT", 8, -6)
-  listHeader:SetText("Notes for:")
-
-  local listRaidName = left:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  listRaidName:SetPoint("LEFT", listHeader, "RIGHT", 6, 0)
-  listRaidName:SetText(GetRaidFullName(currentRaid))
-
   local listScroll = CreateFrame("ScrollFrame", "FRT_NoteListScroll", left, "UIPanelScrollFrameTemplate")
-  listScroll:SetPoint("TOPLEFT", 6, -24)
+  listScroll:SetPoint("TOPLEFT", 6, -6)
   listScroll:SetPoint("BOTTOMRIGHT", -28, 6)
   local listChild = CreateFrame("Frame", nil, listScroll)
   listChild:SetWidth(1); listChild:SetHeight(1)
@@ -439,57 +638,67 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
-  local function MakeItem(parentFrame, y, text, id, isBossHeader)
+  local function MakeRow(parentFrame, y, text, id)
     local btn = CreateFrame("Button", nil, parentFrame)
     btn:SetPoint("TOPLEFT", 0, y)
-    btn:SetWidth(180); btn:SetHeight(isBossHeader and 18 or 20)
-    if isBossHeader then
-      local fs = btn:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-      fs:SetPoint("LEFT", 2, 0); fs:SetText(text)
-      btn.fs = fs
-      btn:EnableMouse(false)
-    else
-      local fs = btn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-      fs:SetPoint("LEFT", 2, 0); fs:SetText(text)
-      btn.fs = fs
-      btn.id = id
-      btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
-      btn:SetScript("OnClick", function()
-        local targetId = id
-        if IsDirty() then
-          pendingNoteSwitch = targetId
-          pendingNoteIsNew  = false
-          ShowBlocker()
-          StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
-        else
-          SwitchNote(targetId, false, false)
-        end
-      end)
-    end
+    btn:SetWidth(180); btn:SetHeight(18)
+
+    local fs = btn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    fs:SetPoint("LEFT", 10, 0) -- small indent
+    fs:SetText(text)
+    btn.fs = fs
+    btn.id = id
+
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Listbox-Highlight2", "ADD")
+    btn:SetScript("OnClick", function()
+      local targetId = id
+      if IsDirty() then
+        pendingNoteSwitch = targetId
+        pendingNoteIsNew  = false
+        ShowBlocker()
+        StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+      else
+        SwitchNote(targetId, false, false)
+      end
+    end)
+
     table.insert(listButtons, btn)
     return btn
   end
 
   RebuildList = function()
     ClearListButtons()
+    listScroll:SetVerticalScroll(0)          -- reset scroll
     listRaidName:SetText(GetRaidFullName(currentRaid))
-    local notes = NotesForRaid(currentRaid)
+
+    local filtered = GetFilteredNotes()
+
     local y = 0
-    local lastBoss = "__NONE__"
-    for i=1, table.getn(notes) do
-      local n = notes[i]
-      if (n.boss or "") ~= lastBoss then
-        MakeItem(listChild, y, (n.boss or "General"), nil, true)
+    if table.getn(filtered) == 0 then
+      -- empty list message
+      local msg = (currentBossFilter == "All") and "(No notes in this raid)" or "(No notes for this boss)"
+      local btn = CreateFrame("Button", nil, listChild)
+      btn:SetPoint("TOPLEFT", 0, y)
+      btn:SetWidth(180); btn:SetHeight(18)
+      local fs = btn:CreateFontString(nil, "ARTWORK", "GameFontDisable")
+      fs:SetPoint("LEFT", 10, 0); fs:SetText(msg)
+      btn.fs = fs; btn:EnableMouse(false)
+      table.insert(listButtons, btn)
+      y = y - 18
+    else
+      for i=1, table.getn(filtered) do
+        local n = filtered[i]
+        local ttl = tostring(n.title or "")
+        ttl = string.gsub(ttl, "^%s*(.-)%s*$", "%1")
+        if ttl == "" then ttl = "(untitled)" end
+        if currentBossFilter == "All" and n.boss and n.boss ~= "" then
+          ttl = ttl .. "  |cffffd200[" .. n.boss .. "]|r" -- subtle boss tag
+        end
+        MakeRow(listChild, y, ttl, n.id)
         y = y - 18
-        lastBoss = n.boss or ""
       end
-      local label = (n.title and n.title ~= "" and (n.boss or "General").." — "..n.title) or (n.boss or "General")
-      MakeItem(listChild, y, label, n.id, false)
-      y = y - 20
     end
-    if y == 0 then
-      MakeItem(listChild, y, "(No notes yet)", nil, true); y = y - 18
-    end
+
     listChild:SetHeight(-y + 4)
     listChild:SetWidth(180)
     UpdateListSelection()
@@ -539,25 +748,17 @@ function Note.BuildNoteEditorPane(parent)
     if UpdateButtonsState then UpdateButtonsState() end
   end
 
-  -- Boss row
-  local bossLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  bossLabel:SetPoint("TOPLEFT", 0, 0); bossLabel:SetText("Boss:")
+  -- Title row + Boss info (read-only)
+  local bossInfoLabelCaption = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  bossInfoLabelCaption:SetPoint("TOPLEFT", 0, 0)
+  bossInfoLabelCaption:SetText("Boss:")
 
-  bossBtn = CreateFrame("Button", "FRT_NoteEditor_BossBtn", right, "UIPanelButtonTemplate")
-  bossBtn:SetPoint("LEFT", bossLabel, "RIGHT", 6, 0)
-  bossBtn:SetWidth(160); bossBtn:SetHeight(20)
-  bossBtn:SetText("General")
-  currentBoss = "General"
-  bossBtn:SetScript("OnClick", function()
-    if not editorEnabled then return end
-    currentBoss = NextBoss(currentRaid, currentBoss or "General")
-    bossBtn:SetText(currentBoss)
-    UpdateDirtyFromUserEdit()
-  end)
+  bossInfoLabel = right:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  bossInfoLabel:SetPoint("LEFT", bossInfoLabelCaption, "RIGHT", 6, 0)
+  bossInfoLabel:SetText("")
 
-  -- Title row
   local titleLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-  titleLabel:SetPoint("TOPLEFT", bossLabel, "BOTTOMLEFT", 0, -8)
+  titleLabel:SetPoint("TOPLEFT", bossInfoLabelCaption, "BOTTOMLEFT", 0, -8)
   titleLabel:SetText("Title:")
 
   titleBox = CreateFrame("EditBox", "FRT_NoteEditor_TitleBox", right, "InputBoxTemplate")
@@ -652,7 +853,7 @@ function Note.BuildNoteEditorPane(parent)
     if Note.EnsureViewer then Note.EnsureViewer() end
     if Note.ShowViewer then Note.ShowViewer() end
   end
-  local function UpdatePreviewFromEditor()
+  UpdatePreviewFromEditor = function()
     local raw = ed.GetText() or ""
     if Note.SetViewerRaw then
       Note.SetViewerRaw(raw)
@@ -673,17 +874,20 @@ function Note.BuildNoteEditorPane(parent)
     end)
   end
 
-  -- Create & select new note (default title)
+  -- Create & select new note (boss taken from currentBossFilter)
   CreateAndSelectNewNote = function()
+    if currentBossFilter == "All" then
+      FRT.Print("Pick a boss in the filter to create a note.")
+      return
+    end
     local now = GetTime()
-    currentBoss = FirstBoss(currentRaid)
     local new = {
-      id = genId(), raid = currentRaid, boss = currentBoss,
+      id = genId(), raid = currentRaid, boss = currentBossFilter,
       title = "New Note", text = "", created = now, modified = now,
     }
     table.insert(FRT_Saved.notes, new)
     currentId = new.id; uiSV.selectedId = new.id
-    RebuildList()
+    if RebuildList then RebuildList() end
     LoadSelected(new.id)
     FRT.Print("New note created.")
   end
@@ -698,14 +902,12 @@ function Note.BuildNoteEditorPane(parent)
       if not (FRT.RaidBosses and FRT.RaidBosses[n.raid or ""]) then
         n.raid = FirstRaidName()
       end
-      currentRaid = n.raid or currentRaid
-      currentBoss = n.boss or FirstBoss(currentRaid)
-      bossBtn:SetText(currentBoss)
+      if bossInfoLabel then bossInfoLabel:SetText(n.boss or "General") end
       if titleBox and titleBox.SetText then titleBox:SetText(n.title or "") end
       ed.SetText(n.text or "")
       SetEditorEnabled(true)
     else
-      bossBtn:SetText(FirstBoss(currentRaid))
+      if bossInfoLabel then bossInfoLabel:SetText("") end
       if titleBox and titleBox.SetText then titleBox:SetText("") end
       ed.SetText("")
       SetEditorEnabled(false)
@@ -723,7 +925,8 @@ function Note.BuildNoteEditorPane(parent)
   local function GatherEditor()
     local t = ed and ed.GetText and (ed.GetText() or "") or ""
     local ttl = (titleBox and titleBox.GetText and (titleBox:GetText() or "")) or ""
-    return { raid = currentRaid, boss = currentBoss or "General", title = ttl, text = t }
+    -- boss/raid are immutable for existing notes; NewNote sets them at creation time
+    return { raid = currentRaid, title = ttl, text = t }
   end
 
   function SaveCurrent()
@@ -733,12 +936,20 @@ function Note.BuildNoteEditorPane(parent)
     if currentId then
       local n = FindNoteById(currentId)
       if n then
-        n.raid = data.raid; n.boss = data.boss; n.title = data.title; n.text = data.text
+        -- DO NOT change n.raid or n.boss (immutable)
+        n.title = data.title
+        n.text = data.text
         n.modified = now
       end
     else
+      -- shouldn't generally happen (editor disabled when no selection),
+      -- but keep a safe path: require specific boss
+      if currentBossFilter == "All" then
+        FRT.Print("Pick a boss in the filter to save this note.")
+        return
+      end
       local new = {
-        id = genId(), raid = data.raid, boss = data.boss, title = data.title, text = data.text,
+        id = genId(), raid = currentRaid, boss = currentBossFilter, title = data.title, text = data.text,
         created = now, modified = now,
       }
       table.insert(FRT_Saved.notes, new)
@@ -746,24 +957,27 @@ function Note.BuildNoteEditorPane(parent)
     end
     FRT.Print("Note saved.")
     SnapBaseline()
-    RebuildList()
+    if RebuildList then RebuildList() end
     if UpdateButtonsState then UpdateButtonsState() end
     UpdateListSelection()
   end
 
-  local function SaveAs()  -- Duplicate
+  local function SaveAs()  -- Duplicate (keep original boss/raid)
     if not editorEnabled then return end
-    local data = GatherEditor()
     local now  = GetTime()
+    local src = currentId and FindNoteById(currentId)
+    if not src then return end
     local copy = {
-      id = genId(), raid = data.raid, boss = data.boss, title = (data.title or "") .. " (copy)",
-      text = data.text, created = now, modified = now,
+      id = genId(), raid = src.raid, boss = src.boss,
+      title = ((src.title or "") ~= "" and (src.title .. " (copy)")) or "New Note (copy)",
+      text = (ed and ed.GetText and ed.GetText()) or "",
+      created = now, modified = now,
     }
     table.insert(FRT_Saved.notes, copy)
     currentId = copy.id; uiSV.selectedId = copy.id
     FRT.Print("Note duplicated.")
     SnapBaseline()
-    RebuildList()
+    if RebuildList then RebuildList() end
     LoadSelected(copy.id)
     if UpdateButtonsState then UpdateButtonsState() end
   end
@@ -774,6 +988,10 @@ function Note.BuildNoteEditorPane(parent)
       pendingNoteIsNew  = true
       ShowBlocker()
       StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+      return
+    end
+    if currentBossFilter == "All" then
+      ShowBossPicker()
     else
       CreateAndSelectNewNote()
     end
@@ -791,9 +1009,9 @@ function Note.BuildNoteEditorPane(parent)
 
   local function CanShareNow()
     if not editorEnabled then return false end
-    if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
     local txt = (ed and ed.GetText and ed.GetText()) or ""
     if txt == "" then return false end
+    if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
     if FRT.IsInRaid and FRT.IsInRaid() then
       return (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) and true or false
     end
@@ -804,20 +1022,39 @@ function Note.BuildNoteEditorPane(parent)
 
   local function ShareCurrent()
     if not editorEnabled then return end
-    local data = GatherEditor()
-    if data.text == "" then FRT.Print("Nothing to share."); return end
+    local txt = (ed and ed.GetText and ed.GetText()) or ""
+    if txt == "" then FRT.Print("Nothing to share."); return end
     if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then
       FRT.Print("Sharing unavailable (NoteNet not loaded)."); return
     end
     if (GetNumRaidMembers() or 0) > 0 then
-      FRT.NoteNet.Send(data.text, "RAID");  FRT.Print("Shared to RAID.")
+      FRT.NoteNet.Send(txt, "RAID");  FRT.Print("Shared to RAID.")
     elseif (GetNumPartyMembers() or 0) > 0 then
-      FRT.NoteNet.Send(data.text, "PARTY"); FRT.Print("Shared to PARTY.")
+      FRT.NoteNet.Send(txt, "PARTY"); FRT.Print("Shared to PARTY.")
     elseif IsInGuild and IsInGuild() then
-      FRT.NoteNet.Send(data.text, "GUILD"); FRT.Print("Shared to GUILD.")
+      FRT.NoteNet.Send(txt, "GUILD"); FRT.Print("Shared to GUILD.")
     else
       FRT.Print("You are not in a group.")
     end
+  end
+
+  -- Tooltip helper for disabled actions under "All bosses"
+  local function WireDisabledTooltip(btn, text)
+    local prevEnter = btn:GetScript("OnEnter")
+    local prevLeave = btn:GetScript("OnLeave")
+
+    btn:SetScript("OnEnter", function(self)
+      if prevEnter then prevEnter(self) end
+      if GameTooltip and (currentBossFilter == "All") then
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(text or "Pick a boss in the filter.", 1,1,1, 1, true)
+      end
+    end)
+
+    btn:SetScript("OnLeave", function(self)
+      if prevLeave then prevLeave(self) end
+      if GameTooltip then GameTooltip:Hide() end
+    end)
   end
 
   -- =========================
@@ -830,6 +1067,7 @@ function Note.BuildNoteEditorPane(parent)
   btnShare  = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
 
   UpdateButtonsState = function()
+    if btnNew  then  btnNew:Enable() end
     if btnSave then if editorEnabled and IsDirty() then btnSave:Enable() else btnSave:Disable() end end
     if btnDup  then if editorEnabled then btnDup:Enable() else btnDup:Disable() end end
     if btnDel  then if editorEnabled then btnDel:Enable() else btnDel:Disable() end end
@@ -848,7 +1086,7 @@ function Note.BuildNoteEditorPane(parent)
 
   -- wire
   btnNew:SetScript("OnClick", NewNote)
-  btnDup:SetScript("OnClick", SaveAs) -- Duplicate
+  btnDup:SetScript("OnClick", SaveAs)
   btnDel:SetScript("OnClick", DeleteNote)
   btnSave:SetScript("OnClick", function()
     if not editorEnabled then return end
@@ -868,14 +1106,15 @@ function Note.BuildNoteEditorPane(parent)
   watch:SetScript("OnEvent", function() if UpdateButtonsState then UpdateButtonsState() end end)
 
   -- Initial state
+  RebuildRaidTabsLocal()
+  RebuildBossFilterDropdown()
   UpdateButtonsState()
 
-  -- Build UI
-  RebuildRaidTabsLocal()
+  -- Build initial list/editor
   RebuildList()
   if currentId and FindNoteById(currentId) then
     LoadSelected(currentId)
-    -- warm-up popup
+    -- warm-up popup so StaticPopup frame exists
     local w = CreateFrame("Frame", nil, parent)
     w:SetScript("OnUpdate", function()
       w:SetScript("OnUpdate", nil)
@@ -884,7 +1123,14 @@ function Note.BuildNoteEditorPane(parent)
       StaticPopup_Hide("FRT_CONFIRM_DELETE_NOTE")
     end)
   else
-    LoadSelected(nil)
+    -- ensure proper disabled state on first open when nothing matches
+    local filtered = GetFilteredNotes()
+    if table.getn(filtered) > 0 then
+      currentId = filtered[1].id; uiSV.selectedId = currentId
+      LoadSelected(currentId)
+    else
+      LoadSelected(nil)
+    end
   end
 end
 
