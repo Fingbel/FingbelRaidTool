@@ -1,4 +1,4 @@
--- Fingbel Raid Tool - Shared Data (Vanilla/Turtle, Lua 5.0)
+-- Fingbel Raid Tool - Shared Data 
 
 FRT      = FRT or {}
 FRT.Data = FRT.Data or {}

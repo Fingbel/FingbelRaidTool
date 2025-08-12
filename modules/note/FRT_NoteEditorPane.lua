@@ -1,4 +1,6 @@
 -- Fingbel Raid Tool - Note Editor Pane (Vanilla 1.12 / Lua 5.0)
+-- Uses nicknames from FRT_RaidData.lua for raid tab buttons
+-- Raid tab order follows FRT.RaidBosses._order; "Custom/Misc" is always placed last.
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
@@ -14,23 +16,87 @@ local function EnsureSaved()
   FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil }
 end
 
+-- Build an ordered raid list:
+-- - If FRT.RaidBosses._order exists (array), follow it exactly (only include keys that actually exist)
+-- - Append any remaining raid keys not in _order (before Misc)
+-- - Ensure "Custom/Misc" exists and is placed last
 local function RaidList()
   local raids = {}
-  if FRT.RaidBosses then
-    for r,_ in pairs(FRT.RaidBosses) do table.insert(raids, r) end
+  local RB = FRT.RaidBosses
+
+  if RB then
+    -- 1) Use _order if present
+    if type(RB._order) == "table" and table.getn(RB._order) > 0 then
+      for i = 1, table.getn(RB._order) do
+        local rname = RB._order[i]
+        if rname and RB[rname] and rname ~= "_order" then
+          table.insert(raids, rname)
+        end
+      end
+      -- 2) Add any missing keys not listed in _order (unordered; pairs)
+      for k,_ in pairs(RB) do
+        if k ~= "_order" then
+          local found = false
+          for i=1, table.getn(raids) do if raids[i] == k then found = true; break end end
+          if not found then table.insert(raids, k) end
+        end
+      end
+    else
+      -- Fallback: collect keys (excluding _order) and sort alphabetically
+      for k,_ in pairs(RB) do if k ~= "_order" then table.insert(raids, k) end end
+      table.sort(raids)
+    end
   end
-  table.sort(raids)
+
+  -- 3) Move/ensure "Custom/Misc" last
+  local misc = "Custom/Misc"
   local hasMisc = false
+  local miscIdx = nil
   for i=1, table.getn(raids) do
-    if raids[i] == "Custom/Misc" then hasMisc = true; break end
+    if raids[i] == misc then hasMisc = true; miscIdx = i; break end
   end
-  if not hasMisc then table.insert(raids, "Custom/Misc") end
+  if miscIdx then table.remove(raids, miscIdx) end
+  if (not RB) or RB[misc] then
+    table.insert(raids, misc)
+  end
+
   return raids
 end
 
+local function FirstRaidName()
+  local raids = RaidList()
+  if table.getn(raids) > 0 then return raids[1] end
+  return "Custom/Misc"
+end
+
 local function BossList(raid)
-  if FRT.RaidBosses and FRT.RaidBosses[raid] then return FRT.RaidBosses[raid] end
+  local entry = FRT.RaidBosses and FRT.RaidBosses[raid]
+  if entry then
+    if type(entry) == "table" and entry.bosses then
+      return entry.bosses
+    elseif type(entry) == "table" then
+      -- backward compatibility if someone still provides a plain array
+      return entry
+    end
+  end
   return { "General" }
+end
+
+local function FirstBoss(raid)
+  local bl = BossList(raid)
+  return (bl and bl[1]) and bl[1] or "General"
+end
+
+local function GetRaidNick(raid)
+  local entry = FRT.RaidBosses and FRT.RaidBosses[raid]
+  if entry and type(entry) == "table" and entry.nick then return entry.nick end
+  return raid
+end
+
+local function GetRaidFullName(raid)
+  local entry = FRT.RaidBosses and FRT.RaidBosses[raid]
+  if entry and type(entry) == "table" and entry.name then return entry.name end
+  return raid
 end
 
 local function BossOrderIndex(raid, boss)
@@ -88,12 +154,20 @@ end
 function Note.BuildNoteEditorPane(parent)
   EnsureSaved()
 
-  local uiSV        = FRT_Saved.ui.notes
-  local currentRaid = uiSV.selectedRaid or "Custom/Misc"
+  local uiSV  = FRT_Saved.ui.notes
+
+  -- Validate selected raid against data
+  local selRaid = uiSV.selectedRaid or "Custom/Misc"
+  if not (FRT.RaidBosses and FRT.RaidBosses[selRaid]) then
+    selRaid = FirstRaidName()
+    uiSV.selectedRaid = selRaid
+  end
+
+  local currentRaid = selRaid
   local currentId   = uiSV.selectedId or nil
   local currentBoss = "General"
 
-  -- forward locals for cross-calls + ui refs
+  -- forward locals for cross-calls + refs
   local RebuildList, LoadSelected, SaveCurrent, UpdateShareButtonState
   local bossBtn, titleBox, ed
   local btnSave, btnShare, btnDup, btnDel, btnNew
@@ -103,7 +177,7 @@ function Note.BuildNoteEditorPane(parent)
   local editorEnabled = false
   local right, rightOverlay, rightOverlayMsg
 
-  -- baseline tracking + squelch to avoid false dirty on programmatic SetText
+  -- baseline tracking + squelch
   local baseline = nil
   local suppressDirty = 0
   local function BeginSquelch() suppressDirty = suppressDirty + 1 end
@@ -114,9 +188,7 @@ function Note.BuildNoteEditorPane(parent)
     local ttl = (titleBox and titleBox.GetText and (titleBox:GetText() or "")) or ""
     return { raid=currentRaid, boss=(currentBoss or "General"), title=ttl, text=t }
   end
-  local function SnapBaseline()
-    baseline = EditorSnapshot()
-  end
+  local function SnapBaseline() baseline = EditorSnapshot() end
   local function IsDirty()
     if not editorEnabled then return false end
     if not baseline then return false end
@@ -128,7 +200,7 @@ function Note.BuildNoteEditorPane(parent)
     if UpdateButtonsState then UpdateButtonsState() end
   end
 
-  -- ==== Modal blocker (clear focus + prevent refocus during popup) ====
+  -- ==== Modal blocker
   local blocker = nil
   local function EnsureBlocker()
     if blocker then return end
@@ -139,7 +211,7 @@ function Note.BuildNoteEditorPane(parent)
     blocker:SetFrameLevel((parent:GetFrameLevel() or 0) + 200)
     local t = blocker:CreateTexture(nil, "BACKGROUND")
     t:SetAllPoints(blocker)
-    t:SetTexture(0,0,0,0) -- invisible click blocker
+    t:SetTexture(0,0,0,0)
     blocker:Hide()
   end
   local function ShowBlocker()
@@ -148,34 +220,32 @@ function Note.BuildNoteEditorPane(parent)
     if titleBox and titleBox.ClearFocus then titleBox:ClearFocus() end
     blocker:Show()
   end
-  local function HideBlocker()
-    if blocker then blocker:Hide() end
-  end
+  local function HideBlocker() if blocker then blocker:Hide() end end
   EnsureBlocker()
 
-  -- pending actions for unsaved popup flows
-  local pendingRaidSwitch = nil
-  local pendingNoteSwitch = nil
-  local pendingNoteIsNew  = false
-  local pendingDeleteId   = nil
+  -- pending flows
+  local pendingRaidSwitch, pendingNoteSwitch, pendingNoteIsNew, pendingDeleteId
+  pendingRaidSwitch, pendingNoteSwitch, pendingNoteIsNew, pendingDeleteId = nil, nil, false, nil
 
-  -- ==== Title ====
+  -- Title
   local title = parent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   title:SetPoint("TOP", 0, -10)
   title:SetText("Fingbel Raid Tool - Notes Editor")
 
-  -- ==== Raid tabs row ====
+  -- Raid tabs
   local tabs = CreateFrame("Frame", "FRT_RaidTabs", parent)
   tabs:SetPoint("TOPLEFT", 0, -26)
   tabs:SetPoint("TOPRIGHT", 0, -26)
   tabs:SetHeight(24)
 
-  -- Forward decl for New creation path
+  -- Forward decl
   local CreateAndSelectNewNote
 
-  -- Switch helpers
   local function SwitchRaid(targetRaid, doSave)
     if doSave and IsDirty() and SaveCurrent then SaveCurrent() end
+    if not (FRT.RaidBosses and FRT.RaidBosses[targetRaid]) then
+      targetRaid = FirstRaidName()
+    end
     currentRaid = targetRaid
     uiSV.selectedRaid = targetRaid
     currentId = nil
@@ -192,7 +262,7 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
-  -- Popups (1.12-safe)
+  -- Popups
   StaticPopupDialogs = StaticPopupDialogs or {}
 
   StaticPopupDialogs["FRT_UNSAVED_SWITCHRAID"] = {
@@ -254,10 +324,8 @@ function Note.BuildNoteEditorPane(parent)
         if delIndex then
           table.remove(FRT_Saved.notes, delIndex)
           FRT.Print("Note deleted.")
-          -- pick neighbor in current raid
           local notes = NotesForRaid(currentRaid)
           if table.getn(notes) > 0 then
-            -- choose the item at the same index (now points to next). If index is past end, pick last.
             local pick = notes[delIndex]
             if not pick then pick = notes[table.getn(notes)] end
             currentId = pick.id; uiSV.selectedId = pick.id
@@ -266,7 +334,7 @@ function Note.BuildNoteEditorPane(parent)
           else
             currentId = nil; uiSV.selectedId = nil
             RebuildList()
-            LoadSelected(nil) -- will disable the editor
+            LoadSelected(nil)
           end
           if UpdateButtonsState then UpdateButtonsState() end
         end
@@ -281,6 +349,7 @@ function Note.BuildNoteEditorPane(parent)
     timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
   }
 
+  -- Build raid tabs using NICKNAMES for the labels, in RaidList() order
   local raidButtons = {}
   local function RebuildRaidTabsLocal()
     for _,b in pairs(raidButtons) do b:Hide() end
@@ -288,12 +357,25 @@ function Note.BuildNoteEditorPane(parent)
     local raids = RaidList()
     local prev
     for i=1, table.getn(raids) do
-      local rname = raids[i]
+      local rname = raids[i]               -- full key
+      local nick  = GetRaidNick(rname)     -- button label
+      local full  = GetRaidFullName(rname) -- tooltip/full name
+
       local b = CreateFrame("Button", nil, tabs, "UIPanelButtonTemplate")
       b:SetHeight(20)
-      b:SetWidth(math.max(80, string.len(rname) * 6 + 20))
+      b:SetWidth(math.max(60, string.len(nick) * 6 + 20))
       if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("LEFT", 0, 0) end
-      b:SetText(rname)
+      b:SetText(nick)
+
+      b:SetScript("OnEnter", function()
+        if full ~= nick and GameTooltip then
+          GameTooltip:SetOwner(b, "ANCHOR_TOP")
+          GameTooltip:SetText(full, 1,1,1)
+          GameTooltip:Show()
+        end
+      end)
+      b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+
       b:SetScript("OnClick", function()
         if IsDirty() then
           pendingRaidSwitch = rname
@@ -327,7 +409,7 @@ function Note.BuildNoteEditorPane(parent)
 
   local listRaidName = left:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   listRaidName:SetPoint("LEFT", listHeader, "RIGHT", 6, 0)
-  listRaidName:SetText(currentRaid)
+  listRaidName:SetText(GetRaidFullName(currentRaid))
 
   local listScroll = CreateFrame("ScrollFrame", "FRT_NoteListScroll", left, "UIPanelScrollFrameTemplate")
   listScroll:SetPoint("TOPLEFT", 6, -24)
@@ -342,7 +424,6 @@ function Note.BuildNoteEditorPane(parent)
     listButtons = {}
   end
 
-  -- selection updater
   local function UpdateListSelection()
     for i=1, table.getn(listButtons) do
       local b = listButtons[i]
@@ -391,7 +472,7 @@ function Note.BuildNoteEditorPane(parent)
 
   RebuildList = function()
     ClearListButtons()
-    listRaidName:SetText(currentRaid)
+    listRaidName:SetText(GetRaidFullName(currentRaid))
     local notes = NotesForRaid(currentRaid)
     local y = 0
     local lastBoss = "__NONE__"
@@ -432,7 +513,7 @@ function Note.BuildNoteEditorPane(parent)
   right:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
   right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14)
 
-  -- Disabled overlay (blocks interaction when no selection)
+  -- Disabled overlay
   rightOverlay = CreateFrame("Frame", nil, right)
   rightOverlay:SetAllPoints(right)
   rightOverlay:EnableMouse(true)
@@ -592,10 +673,10 @@ function Note.BuildNoteEditorPane(parent)
     end)
   end
 
-  -- Helper: create & select a new note immediately (default title)
+  -- Create & select new note (default title)
   CreateAndSelectNewNote = function()
     local now = GetTime()
-    currentBoss = (BossList(currentRaid)[1]) or "General"
+    currentBoss = FirstBoss(currentRaid)
     local new = {
       id = genId(), raid = currentRaid, boss = currentBoss,
       title = "New Note", text = "", created = now, modified = now,
@@ -603,28 +684,28 @@ function Note.BuildNoteEditorPane(parent)
     table.insert(FRT_Saved.notes, new)
     currentId = new.id; uiSV.selectedId = new.id
     RebuildList()
-    LoadSelected(new.id)  -- sets baseline, updates selection highlight & buttons, enables editor
+    LoadSelected(new.id)
     FRT.Print("New note created.")
   end
 
-  -- ================
   -- Load/save/share
-  -- ================
-  LoadSelected = function(id)
+  function LoadSelected(id)
     currentId = id
     uiSV.selectedId = id
     BeginSquelch()
     local n = id and FindNoteById(id) or nil
     if n then
+      if not (FRT.RaidBosses and FRT.RaidBosses[n.raid or ""]) then
+        n.raid = FirstRaidName()
+      end
       currentRaid = n.raid or currentRaid
-      currentBoss = n.boss or "General"
+      currentBoss = n.boss or FirstBoss(currentRaid)
       bossBtn:SetText(currentBoss)
       if titleBox and titleBox.SetText then titleBox:SetText(n.title or "") end
       ed.SetText(n.text or "")
       SetEditorEnabled(true)
     else
-      -- no selection: show empty, disable editor, clear baseline so no dirty prompts
-      bossBtn:SetText((BossList(currentRaid)[1]) or "General")
+      bossBtn:SetText(FirstBoss(currentRaid))
       if titleBox and titleBox.SetText then titleBox:SetText("") end
       ed.SetText("")
       SetEditorEnabled(false)
@@ -645,7 +726,7 @@ function Note.BuildNoteEditorPane(parent)
     return { raid = currentRaid, boss = currentBoss or "General", title = ttl, text = t }
   end
 
-  SaveCurrent = function()
+  function SaveCurrent()
     if not editorEnabled then return end
     local data = GatherEditor()
     local now  = GetTime()
@@ -670,7 +751,7 @@ function Note.BuildNoteEditorPane(parent)
     UpdateListSelection()
   end
 
-  local function SaveAs()
+  local function SaveAs()  -- Duplicate
     if not editorEnabled then return end
     local data = GatherEditor()
     local now  = GetTime()
@@ -680,11 +761,11 @@ function Note.BuildNoteEditorPane(parent)
     }
     table.insert(FRT_Saved.notes, copy)
     currentId = copy.id; uiSV.selectedId = copy.id
-    FRT.Print("Note saved as new.")
+    FRT.Print("Note duplicated.")
     SnapBaseline()
     RebuildList()
-    if UpdateButtonsState then UpdateButtonsState() end
     LoadSelected(copy.id)
+    if UpdateButtonsState then UpdateButtonsState() end
   end
 
   local function NewNote()
@@ -698,6 +779,7 @@ function Note.BuildNoteEditorPane(parent)
     end
   end
 
+  private_DeleteNote = nil
   local function DeleteNote()
     if not currentId then FRT.Print("No note selected."); return end
     pendingDeleteId = currentId
@@ -748,30 +830,25 @@ function Note.BuildNoteEditorPane(parent)
   btnShare  = CreateFrame("Button", "FRT_NoteBtn_Share", bottomBar, "UIPanelButtonTemplate")
 
   UpdateButtonsState = function()
-    -- Save
     if btnSave then if editorEnabled and IsDirty() then btnSave:Enable() else btnSave:Disable() end end
-    --Duplicate
-    if btnDup then if editorEnabled then btnDup:Enable() else btnDup:Disable() end end
-    -- Delete
-    if btnDel then if editorEnabled then btnDel:Enable() else btnDel:Disable() end end
-    -- Share
+    if btnDup  then if editorEnabled then btnDup:Enable() else btnDup:Disable() end end
+    if btnDel  then if editorEnabled then btnDel:Enable() else btnDel:Disable() end end
     if btnShare then if CanShareNow() then btnShare:Enable() else btnShare:Disable() end end
-    -- New is always enabled (no gating)
   end
 
   UpdateShareButtonState = function() UpdateButtonsState() end
 
-  -- layout bottom buttons
+  -- layout bottom buttons (Left: New/Duplicate/Delete; Right: Save/Share)
   btnNew:SetWidth(80);   btnNew:SetHeight(22);   btnNew:SetPoint("LEFT", 0, 0);                         btnNew:SetText("New")
   btnDup:SetWidth(80);   btnDup:SetHeight(22);   btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);        btnDup:SetText("Duplicate")
   btnDel:SetWidth(80);   btnDel:SetHeight(22);   btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);        btnDel:SetText("Delete")
 
-  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0); btnShare:SetText("Share")
+  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0);  btnShare:SetText("Share")
   btnSave:SetWidth(80);  btnSave:SetHeight(22);  btnSave:SetPoint("RIGHT", btnShare, "LEFT", -6, 0);    btnSave:SetText("Save")
 
   -- wire
   btnNew:SetScript("OnClick", NewNote)
-  btnDup:SetScript("OnClick", SaveAs)
+  btnDup:SetScript("OnClick", SaveAs) -- Duplicate
   btnDel:SetScript("OnClick", DeleteNote)
   btnSave:SetScript("OnClick", function()
     if not editorEnabled then return end
@@ -781,7 +858,7 @@ function Note.BuildNoteEditorPane(parent)
   end)
   btnShare:SetScript("OnClick", ShareCurrent)
 
-  -- ========== Event watcher ==========
+  -- events
   local watch = CreateFrame("Frame", nil, bottomBar)
   watch:RegisterEvent("PLAYER_ENTERING_WORLD")
   watch:RegisterEvent("PARTY_MEMBERS_CHANGED")
@@ -793,12 +870,12 @@ function Note.BuildNoteEditorPane(parent)
   -- Initial state
   UpdateButtonsState()
 
-  -- Initial build
+  -- Build UI
   RebuildRaidTabsLocal()
   RebuildList()
   if currentId and FindNoteById(currentId) then
     LoadSelected(currentId)
-    -- warm-up static popup to avoid first-use hitch
+    -- warm-up popup
     local w = CreateFrame("Frame", nil, parent)
     w:SetScript("OnUpdate", function()
       w:SetScript("OnUpdate", nil)
@@ -807,7 +884,7 @@ function Note.BuildNoteEditorPane(parent)
       StaticPopup_Hide("FRT_CONFIRM_DELETE_NOTE")
     end)
   else
-    LoadSelected(nil) -- will disable editor
+    LoadSelected(nil)
   end
 end
 
