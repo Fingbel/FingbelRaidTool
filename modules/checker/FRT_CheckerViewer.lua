@@ -139,7 +139,7 @@ local function CreateHeader(parent)
   name:SetPoint("LEFT",  header, "LEFT", NAME_START_X, 0)
   name:SetPoint("RIGHT", header, "LEFT", COL_START_X - 4, 0)
   name:SetJustifyH("LEFT")
-  name:SetText("Name")
+  --name:SetText("Name")
 
   header.name = name
   header.cols = {}
