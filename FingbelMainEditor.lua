@@ -56,9 +56,9 @@ function E:_CreateWindowOnce()
 
   -- title/drag
   local drag = CreateFrame("Frame", nil, f)
-  drag:SetPoint("TOPLEFT", 12, -8)
+  drag:SetPoint("TOPLEFT", 12, 0)
   drag:SetPoint("TOPRIGHT", -32, -8)
-  drag:SetHeight(22)
+  drag:SetHeight(18)
   drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
   drag:SetScript("OnDragStart", function() f:StartMoving() end)
@@ -93,28 +93,25 @@ function E:_CreateWindowOnce()
     if w and h then sv.w, sv.h = w,h end
     if self.left and self.content then
       self.content:ClearAllPoints()
+      -- was: (drag:GetHeight() or 16)
       self.content:SetPoint("TOPLEFT", self.left, "TOPRIGHT", 10, 0)
       self.content:SetPoint("BOTTOMRIGHT", -14, 14)
     end
-    -- notify current pane
     if self._current and self._frames[self._current] then
       local pane = self._frames[self._current]
       if pane.OnHostResized then pane:OnHostResized(f) end
     end
   end)
 
-  local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  title:SetPoint("TOP", 0, -10)
-  title:SetText("Fingbel Raid Tool")
-
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -5, -5)
 
   -- left (tabs) — a bit wider to suit more raid names
   local left = CreateFrame("Frame", nil, f)
-  left:SetPoint("TOPLEFT", 14, -36)
+  left:ClearAllPoints() 
+  left:SetPoint("TOPLEFT", drag, "BOTTOMLEFT", 14, -8)  -- no extra vertical gap
+  left:SetPoint("BOTTOMLEFT", 14, 24)
   left:SetWidth(100)
-  left:SetPoint("BOTTOMLEFT", 14, 14)
   left:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -123,12 +120,24 @@ function E:_CreateWindowOnce()
   })
   left:SetBackdropColor(0,0,0,0.4)
 
+  -- after `left` exists, re-anchor drag to only sit above the left column
+  drag:ClearAllPoints()
+  drag:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -8)
+  drag:SetPoint("TOPRIGHT", f, "TOPLEFT", 12 + 100, -8)
+  drag:SetHeight(16)
+
+
+  local title = drag:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    title:SetText("Fingbel Raid Tool")
+    title:SetJustifyH("CENTER")    
+    title:SetPoint("BOTTOM", left, "TOP", 0, 0)  -- centered above the left column
+
   -- right content
   local content = CreateFrame("Frame", nil, f)
-  content:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
-  content:SetPoint("BOTTOMRIGHT", -14, 14)
-
-  self.frame, self.left, self.content = f, left, content
+    content:ClearAllPoints()
+    content:SetPoint("TOPLEFT", left, "TOPRIGHT", 10, 0)
+    content:SetPoint("BOTTOMRIGHT", -14, 14)
+    self.frame, self.left, self.content = f, left, content
 
   -- lifecycle passthrough
   f:SetScript("OnShow", function()
