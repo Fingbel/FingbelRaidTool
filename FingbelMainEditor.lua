@@ -44,19 +44,20 @@ function E:_CreateWindowOnce()
 
   local f = CreateFrame("Frame", "FRT_MainEditor", UIParent)
   f:SetFrameStrata("DIALOG")
-  f:SetWidth(sv.w or 800); f:SetHeight(sv.h or 500)
+  f:SetWidth(sv.w or 800); 
+  f:SetHeight(sv.h or 500)
   f:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
     tile = true, tileSize = 32, edgeSize = 32,
-    insets   = { left = 11, right = 12, top = 12, bottom = 11 }
+    insets   = { left = 4, right = 4, top = 4, bottom = 4 }
   })
   f:EnableMouse(true)
   f:SetMovable(true)
 
   -- title/drag
   local drag = CreateFrame("Frame", nil, f)
-  drag:SetPoint("TOPLEFT", 12, 0)
+  drag:SetPoint("TOPLEFT", 8, 0)
   drag:SetPoint("TOPRIGHT", -32, -8)
   drag:SetHeight(18)
   drag:EnableMouse(true)

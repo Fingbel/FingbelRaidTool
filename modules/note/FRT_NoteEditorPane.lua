@@ -123,9 +123,14 @@ function Note.BuildNoteEditorPane(parent)
 
   -- title text
   local titleFS = header:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
-  titleFS:SetPoint("LEFT", 8, -1)
+  titleFS:SetPoint("CENTER",header, "CENTER", -50, 0)
   titleFS:SetText("Raid Notes")
-  titleFS:SetJustifyH("CENTER")
+  
+  -- ==== Bottom bar  ====
+  local bottomBar = CreateFrame("Frame", "FRT_NoteEditor_BottomBar", parent)
+  bottomBar:SetPoint("BOTTOMLEFT", 0, 0)
+  bottomBar:SetPoint("BOTTOMRIGHT", 0, 0)
+  bottomBar:SetHeight(40)
 
   local uiSV  = FRT_Saved.ui.notes
 
@@ -211,9 +216,14 @@ function Note.BuildNoteEditorPane(parent)
 
   -- container for the whole left side
   local leftColumn = CreateFrame("Frame", "FRT_NoteLeftColumn", parent)
-  leftColumn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -10)
-  leftColumn:SetPoint("BOTTOMLEFT", 0, 28)   -- above the bottom bar
-  leftColumn:SetWidth(220)
+  leftColumn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -15)
+  leftColumn:SetPoint("BOTTOMLEFT", bottomBar, "TOPLEFT", 0, 0)
+  leftColumn:SetWidth(200)
+
+    -- ==== Right: Editor ====
+  right = CreateFrame("Frame", "FRT_NoteEditorPane", parent)
+  right:SetPoint("TOPLEFT", leftColumn, "TOPRIGHT", 12, 0)
+  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 0)
 
   -- ==== Raid selector bar (dropdown) ====
   local raidBar = CreateFrame("Frame", "FRT_RaidBar", leftColumn)
@@ -227,13 +237,13 @@ function Note.BuildNoteEditorPane(parent)
 
   local raidDD = CreateFrame("Frame", "FRT_NoteFilter_RaidDropDown", raidBar, "UIDropDownMenuTemplate")
   raidDD:SetPoint("LEFT", raidLabel, "RIGHT", -6, 2)
-  UIDropDownMenu_SetWidth(160, raidDD)      -- (width, frame) ordering in 1.12
+  UIDropDownMenu_SetWidth(130, raidDD)      -- (width, frame) ordering in 1.12
   UIDropDownMenu_JustifyText("LEFT", raidDD)
 
   -- Boss Filter Bar (under the raid bar)
   local filterBar = CreateFrame("Frame", "FRT_NoteFilterBar", raidBar)
-  filterBar:SetPoint("TOPLEFT", raidBar, "BOTTOMLEFT", 0, -10)
-  filterBar:SetPoint("TOPRIGHT", raidBar, "BOTTOMRIGHT", 0, -6)
+  filterBar:SetPoint("TOPLEFT", raidBar, "BOTTOMLEFT", 0, -8)
+  filterBar:SetPoint("TOPRIGHT", raidBar, "BOTTOMRIGHT", 0, -8)
   filterBar:SetHeight(22)
 
   local bossFilterLabel = filterBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -242,7 +252,7 @@ function Note.BuildNoteEditorPane(parent)
 
   local bossFilterDD = CreateFrame("Frame", "FRT_NoteFilter_BossDropDown", filterBar, "UIDropDownMenuTemplate")
   bossFilterDD:SetPoint("LEFT", bossFilterLabel, "RIGHT", -6, 2)
-  UIDropDownMenu_SetWidth(160, bossFilterDD)
+  UIDropDownMenu_SetWidth(130, bossFilterDD)
   UIDropDownMenu_JustifyText("LEFT", bossFilterDD)
 
   -- Apply boss filter
@@ -350,9 +360,10 @@ function Note.BuildNoteEditorPane(parent)
 
   -- ==== Left: Note list (with backdrop) ====
   local left = CreateFrame("Frame", "FRT_NoteList", leftColumn)
-  left:SetPoint("TOPLEFT",  filterBar, "BOTTOMLEFT", 0, -2)  -- top anchored under Boss dropdown
+    left:SetPoint("TOPLEFT",  filterBar, "BOTTOMLEFT", 0, -2)  -- top anchored under Boss dropdown
   left:SetPoint("BOTTOMLEFT", 0, 0)                          -- bottom pinned to leftColumn
-  left:SetWidth(220)
+
+  left:SetWidth(200)
   left:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
     edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -480,24 +491,6 @@ function Note.BuildNoteEditorPane(parent)
     UpdateListSelection()
   end
 
-  -- ==== Bottom bar (created before right pane so we can anchor to it) ====
-  local bottomBar = CreateFrame("Frame", "FRT_NoteEditor_BottomBar", parent)
-  bottomBar:SetPoint("BOTTOMLEFT", 0, 0)
-  bottomBar:SetPoint("BOTTOMRIGHT", 0, 0)
-  bottomBar:SetHeight(36)
-
-  local divider = bottomBar:CreateTexture(nil, "ARTWORK")
-  divider:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 0, 1)
-  divider:SetPoint("TOPRIGHT", parent, "BOTTOMRIGHT", 0, 1)
-  divider:SetHeight(1)
-  divider:SetTexture("Interface\\Buttons\\WHITE8x8")
-  divider:SetVertexColor(1,1,1,0.10)
-
-  -- ==== Right: Editor ====
-  right = CreateFrame("Frame", "FRT_NoteEditorPane", parent)
-  right:SetPoint("TOPLEFT", leftColumn, "TOPRIGHT", 10, 0)
-  right:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", -14, 14)
-
   -- Disabled overlay
   rightOverlay = CreateFrame("Frame", nil, right)
   rightOverlay:SetAllPoints(right)
@@ -589,40 +582,19 @@ function Note.BuildNoteEditorPane(parent)
   -- Text editor (scrollable)
   local editArea = CreateFrame("Frame", nil, right)
   editArea:SetPoint("TOPLEFT", toolbar, "BOTTOMLEFT", 0, -8)
-  editArea:SetPoint("BOTTOMRIGHT", bottomBar, "TOPRIGHT", 0, -8)
+  editArea:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, 0)
 
-  local function CreateScrollableEdit_Fallback(parentFrame)
-    local s = CreateFrame("ScrollFrame", nil, parentFrame, "UIPanelScrollFrameTemplate")
-    s:SetPoint("TOPLEFT", 0, 0); s:SetPoint("BOTTOMRIGHT", 0, 0)
-    local eb = CreateFrame("EditBox", nil, s)
-    eb:SetMultiLine(true); eb:SetAutoFocus(false)
-    eb:SetFontObject(ChatFontNormal)
-    eb:SetWidth(parentFrame:GetWidth() - 24)
-    eb:SetText("")
-    s:SetScrollChild(eb)
-    return {
-      edit = eb,
-      GetText = function() return eb:GetText() end,
-      SetText = function(t) eb:SetText(t or "") end,
-      Refresh = function() end,
-    }
-  end
-
-  if FRT and FRT.Utils and FRT.Utils.CreateScrollableEdit then
-    ed = FRT.Utils.CreateScrollableEdit(editArea, {
-      name             = "FRT_NoteEditor_Scroll",
-      rightColumnWidth = 20,
-      padding          = 4,
-      minHeight        = 200,
-      insets           = { left=4, right=4, top=4, bottom=4 },
-      fontObject       = "ChatFontNormal",
-      background       = "Interface\\ChatFrame\\ChatFrameBackground",
-      border           = "Interface\\Tooltips\\UI-Tooltip-Border",
-      readonly         = false,
-    })
-  else
-    ed = CreateScrollableEdit_Fallback(editArea)
-  end
+  ed = FRT.Utils.CreateScrollableEdit(editArea, {
+    name             = "FRT_NoteEditor_Scroll",
+    rightColumnWidth = 20,
+    padding          = 4,
+    minHeight        = 200,
+    insets           = { left=4, right=4, top=4, bottom=4 },
+    fontObject       = "ChatFontNormal",
+    background       = "Interface\\ChatFrame\\ChatFrameBackground",
+    border           = "Interface\\Tooltips\\UI-Tooltip-Border",
+    readonly         = false,
+  })
 
   -- Live preview helpers
   local function EnsureViewerVisible()
@@ -908,11 +880,11 @@ function Note.BuildNoteEditorPane(parent)
   UpdateShareButtonState = function() UpdateButtonsState() end
 
   -- layout bottom buttons (Left: New/Duplicate/Delete; Right: Save/Share)
-  btnNew:SetWidth(80);   btnNew:SetHeight(22);   btnNew:SetPoint("LEFT", 0, 0);                         btnNew:SetText("New")
-  btnDup:SetWidth(80);   btnDup:SetHeight(22);   btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);        btnDup:SetText("Duplicate")
-  btnDel:SetWidth(80);   btnDel:SetHeight(22);   btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);        btnDel:SetText("Delete")
+  btnNew:SetWidth(62);   btnNew:SetHeight(22);   btnNew:SetPoint("LEFT", 0, 0);                         btnNew:SetText("New")
+  btnDup:SetWidth(62);   btnDup:SetHeight(22);   btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);        btnDup:SetText("Duplicate")
+  btnDel:SetWidth(62);   btnDel:SetHeight(22);   btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);        btnDel:SetText("Delete")
 
-  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", 0, 0);  btnShare:SetText("Share")
+  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", -12, 0);  btnShare:SetText("Share")
   btnSave:SetWidth(80);  btnSave:SetHeight(22);  btnSave:SetPoint("RIGHT", btnShare, "LEFT", -6, 0);    btnSave:SetText("Save")
 
   -- wire
