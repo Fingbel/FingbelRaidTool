@@ -109,7 +109,7 @@ function Note.BuildNoteEditorPane(parent)
 
   -- ==== Top header (title bar) ====
   local header = CreateFrame("Frame", "FRT_NoteEditor_Header", parent)
-  header:SetPoint("TOPLEFT", 0, 18)
+  header:SetPoint("TOPLEFT", 0, 24)
   header:SetPoint("TOPRIGHT", 0, 0)
   header:SetHeight(26)
 
@@ -529,6 +529,7 @@ function Note.BuildNoteEditorPane(parent)
   local titleLabel = right:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   titleLabel:SetPoint("TOPLEFT", bossInfoLabelCaption, "BOTTOMLEFT", 0, -8)
   titleLabel:SetText("Title:")
+  titleLabel:SetWidth(120)
 
   titleBox = CreateFrame("EditBox", "FRT_NoteEditor_TitleBox", right, "InputBoxTemplate")
   titleBox:SetAutoFocus(false); titleBox:SetHeight(20); titleBox:SetWidth(260)

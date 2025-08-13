@@ -55,10 +55,8 @@ function E:_CreateWindowOnce()
   f:EnableMouse(true)
   f:SetMovable(true)
 
-  -- title/drag
+  -- drag
   local drag = CreateFrame("Frame", nil, f)
-  drag:SetPoint("TOPLEFT", 8, 0)
-  drag:SetPoint("TOPRIGHT", -32, -8)
   drag:SetHeight(18)
   drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
@@ -107,11 +105,11 @@ function E:_CreateWindowOnce()
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -5, -5)
 
-  -- left (tabs) — a bit wider to suit more raid names
+  -- left 
   local left = CreateFrame("Frame", nil, f)
   left:ClearAllPoints() 
-  left:SetPoint("TOPLEFT", drag, "BOTTOMLEFT", 14, -8)  -- no extra vertical gap
-  left:SetPoint("BOTTOMLEFT", 14, 24)
+  left:SetPoint("TOPLEFT", drag, "BOTTOMLEFT", 4, -8)  
+  left:SetPoint("BOTTOMLEFT", 0, 24)
   left:SetWidth(100)
   left:SetBackdrop({
     bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -123,15 +121,15 @@ function E:_CreateWindowOnce()
 
   -- after `left` exists, re-anchor drag to only sit above the left column
   drag:ClearAllPoints()
-  drag:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -8)
-  drag:SetPoint("TOPRIGHT", f, "TOPLEFT", 12 + 100, -8)
+  drag:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -16)
+  drag:SetPoint("TOPRIGHT", f, "TOPLEFT", 16 + 110, -16)
   drag:SetHeight(16)
 
 
   local title = drag:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     title:SetText("Fingbel Raid Tool")
     title:SetJustifyH("CENTER")    
-    title:SetPoint("BOTTOM", left, "TOP", 0, 0)  -- centered above the left column
+    title:SetPoint("CENTER", drag, "CENTER",0,-4)  -- centered above the left column
 
   -- right content
   local content = CreateFrame("Frame", nil, f)
