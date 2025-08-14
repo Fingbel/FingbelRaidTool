@@ -36,9 +36,12 @@ FingbelMainEditor.lua
 
 modules\note\FRT_NoteCore.lua
 modules\note\FRT_NoteNet.lua
-modules\note\FRT_Parser.lua
-modules\note\FRT_NoteEditorPane.lua
+modules\note\FRT_NoteParser.lua
 modules\note\FRT_NoteViewer.lua
+modules\note\FRT_NoteEditorPane.Entry.lua
+modules\note\FRT_NoteEditorPane.State.lua
+modules\note\FRT_NoteEditorPane.Logic.lua
+modules\note\FRT_NoteEditorPane.UI.lua
 
 modules\checker\FRT_CheckerCore.lua
 modules\checker\FRT_CheckerEditorPane.lua

@@ -22,7 +22,7 @@ function Note.UpdateViewerText()
   if not ed then return end
   local text = (FRT_Saved and FRT_Saved.note) or ""
 
-  local Parser = FRT.Note and FRT.Note.Parser
+  local Parser = (FRT.Note and FRT.Note.Parser) or FRT.Parser
   if Parser and Parser.Parse and ed.SetTokens then
     local tokens = Parser.Parse(text)
     ed.SetTokens(tokens)
