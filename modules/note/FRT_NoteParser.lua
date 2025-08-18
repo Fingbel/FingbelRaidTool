@@ -1,4 +1,5 @@
 -- Fingbel Raid Tool - Parser
+--FRT_NoteParser.lua --
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}

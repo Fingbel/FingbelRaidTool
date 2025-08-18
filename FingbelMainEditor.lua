@@ -1,4 +1,6 @@
 -- Fingbel Raid Tool — Main Editor Host 
+--FingbelMainEditor.lua 
+
 FRT = FRT or {}
 FRT.Editor = FRT.Editor or {}
 

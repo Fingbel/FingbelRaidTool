@@ -1,4 +1,5 @@
 -- Fingbel Raid Tool - Note Viewer
+--FRT_NoteViewer.lua --
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}

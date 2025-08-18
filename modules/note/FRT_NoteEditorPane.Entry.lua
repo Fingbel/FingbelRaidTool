@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool — Note Editor Pane (Entry)
--- Public entry + namespace + exports
+--FRT_NoteEditorPane.Entry.lua --
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}

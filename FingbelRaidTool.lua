@@ -1,4 +1,5 @@
 -- Fingbel Raid Tool - Core File
+-- FingbelRaidTool.lua
 
 FRT = FRT or {}
 FRT.Modules = FRT.Modules or {}

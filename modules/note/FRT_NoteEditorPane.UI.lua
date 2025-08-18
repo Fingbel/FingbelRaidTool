@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool — Note Editor Pane (UI)
--- Build frames, wire handlers, initial boot, sync/update buttons (Vanilla 1.12 / Lua 5.0)
+--FRT_NoteEditorPane.UI.lua --
 
 local FRT = FRT
 local EP  = FRT.Note.EditorPane
@@ -372,7 +372,7 @@ function EP.Build(parent)
   btnDup:SetWidth(62);   btnDup:SetHeight(22);   btnDup:SetPoint("LEFT", btnNew, "RIGHT", 6, 0);        btnDup:SetText("Duplicate")
   btnDel:SetWidth(62);   btnDel:SetHeight(22);   btnDel:SetPoint("LEFT", btnDup, "RIGHT", 6, 0);        btnDel:SetText("Delete")
 
-  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", -12, 0); btnShare:SetText("Share")
+  btnShare:SetWidth(80); btnShare:SetHeight(22); btnShare:SetPoint("RIGHT", bottomBar, "RIGHT", -12, 0); btnShare:SetText("Broadcast")
   btnSave:SetWidth(80);  btnSave:SetHeight(22);  btnSave:SetPoint("RIGHT", btnShare, "LEFT", -6, 0);     btnSave:SetText("Save")
 
   -- Wire buttons

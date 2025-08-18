@@ -1,6 +1,5 @@
--- FRT_RaidData.lua
 -- Fingbel Raid Tool – Raid/Boss data (Vanilla 1.12)
--- Now includes nicknames for editor display
+-- FRT_RaidData.lua
 
 FRT = FRT or {}
 

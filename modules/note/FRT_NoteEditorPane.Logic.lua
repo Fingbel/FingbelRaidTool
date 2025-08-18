@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool — Note Editor Pane (Logic)
--- Data helpers, dropdowns, list/filter, load/save/new/dup/del, share, popups
+--FRT_NoteEditorPane.Logic.lua --
 
 local FRT = FRT
 local EP  = FRT.Note.EditorPane
@@ -14,6 +14,31 @@ function EP.EnsureSaved()
   FRT_Saved.ui    = FRT_Saved.ui or {}
   FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil }
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
+end
+
+function PickChannel()
+    if IsInGuild and IsInGuild() then return "GUILD" end
+    if (GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) then return "RAID" end
+    if (GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) then return "PARTY" end
+    return nil
+  end
+
+-- Tiny 16-bit hash (Lua 5.0-safe) used everywhere in this file
+local function Hash16(s)
+  s = tostring(s or "")
+  local sum = 0
+  for i = 1, string.len(s) do
+    sum = math.mod(sum + string.byte(s, i), 65536)
+  end
+  local t = "0123456789ABCDEF"
+  local hi = math.mod(math.floor(sum / 256), 256)
+  local lo = math.mod(sum, 256)
+  local function hx(v)
+    local a = math.floor(v / 16)
+    local b = math.mod(v, 16)
+    return string.sub(t, a + 1, a + 1) .. string.sub(t, b + 1, b + 1)
+  end
+  return hx(hi) .. hx(lo)
 end
 
 local function genId()
@@ -227,15 +252,15 @@ function EP.UpdatePreviewFromEditor()
   local ed = S.editor
   local raw = (ed and ed.GetText and ed.GetText()) or ""
 
-  -- Always keep the raw current so the viewer can parse from storage if needed
+  -- Scratch now mirrors "currently edited" content
   if type(FRT_Saved) ~= "table" then FRT_Saved = {} end
   FRT_Saved.note = raw
 
-  -- Best available render path
+  -- Push to viewer using best available renderer
   if FRT.Note and FRT.Note.SetViewerRaw then
-    FRT.Note.SetViewerRaw(raw)      -- tokenized path (preferred)
+    FRT.Note.SetViewerRaw(raw)
   elseif FRT.Note and FRT.Note.UpdateViewerText then
-    FRT.Note.UpdateViewerText()     -- pulls from FRT_Saved.note and parses
+    FRT.Note.UpdateViewerText()
   end
 end
 
@@ -297,45 +322,91 @@ end
 
 function EP.SaveCurrent()
   if not S.editorEnabled then return end
+
   local data = GatherEditor()
-  local now  = GetTime()
+  local now  = GetTime() or 0
+  local noteRef
+
   if S.currentId then
+    -- update existing
     local n = EP.FindNoteById(S.currentId)
     if n then
-      n.title = data.title
-      n.text  = data.text
+      n.title    = data.title
+      n.text     = data.text
       n.modified = now
+      n.version  = (tonumber(n.version) or 0) + 1
+      n.hash     = Hash16(n.text or "")
+      noteRef    = n
     end
   else
+    -- create new (must not be on "All" boss filter)
     if S.currentBossFilter == "All" then
       if FRT.Print then FRT.Print("Pick a boss in the filter to save this note.") end
       return
     end
     local new = {
-      id = genId(), raid = S.currentRaid, boss = S.currentBossFilter, title = data.title, text = data.text,
-      created = now, modified = now,
+      id       = genId(),
+      raid     = S.currentRaid,
+      boss     = S.currentBossFilter,
+      title    = data.title,
+      text     = data.text,
+      created  = now,
+      modified = now,
+      version  = 1,
+      hash     = Hash16(data.text or ""),
     }
     table.insert(FRT_Saved.notes, new)
-    S.currentId = new.id; S.uiSV.selectedId = new.id
+    S.currentId = new.id
+    S.uiSV.selectedId = new.id
+    noteRef = new
+    if FRT.Print then FRT.Print("New note created.") end
   end
+
+  -- scratch mirrors the currently edited (and now saved) text
+  FRT_Saved.note = data.text or ""
+
+  -- broadcast to shared library (guild preferred; otherwise group)
+  if noteRef and FRT.NoteNet and FRT.NoteNet.SendLibAdd then
+    local meta = {
+      id      = noteRef.id,
+      version = noteRef.version or 1,
+      hash    = noteRef.hash or Hash16(noteRef.text or ""),
+      title   = noteRef.title or "",
+      raid    = noteRef.raid  or "",
+      boss    = noteRef.boss  or "",
+    }
+    local ch = PickChannel()
+    if ch then
+      FRT.NoteNet.SendLibAdd(meta, noteRef.text or "", ch)
+    end
+  end
+
   if FRT.Print then FRT.Print("Note saved.") end
   EP.SnapBaseline()
   EP.RebuildList()
   if EP.UpdateButtonsState then EP.UpdateButtonsState() end
   EP.UpdateListSelection()
+
+  -- keep live preview in sync
+  if S.editor and S.editor.Refresh then S.editor.Refresh() end
+  if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
 end
 
 function EP.SaveAs()
   if not S.editorEnabled then return end
-  local now  = GetTime()
-  local src = S.currentId and EP.FindNoteById(S.currentId)
-  if not src then return end
-  local ed = S.editor
+  local src = S.currentId and EP.FindNoteById(S.currentId); if not src then return end
+  local now = GetTime() or 0
+  local ed  = S.editor
+  local text = (ed and ed.GetText and ed.GetText()) or ""
+
   local copy = {
-    id = genId(), raid = src.raid, boss = src.boss,
-    title = ((src.title or "") ~= "" and (src.title .. " (copy)")) or "New Note (copy)",
-    text = (ed and ed.GetText and ed.GetText()) or "",
-    created = now, modified = now,
+    id       = tostring(math.mod(math.floor(GetTime()*1000), 100000000))..tostring(math.random(100,999)),
+    raid     = src.raid, boss = src.boss,
+    title    = ((src.title or "") ~= "" and (src.title .. " (copy)")) or "New Note (copy)",
+    text     = text,
+    created  = now, modified = now,
+    version  = 1,
+    hash     = Hash16(text),
   }
   table.insert(FRT_Saved.notes, copy)
   S.currentId = copy.id; S.uiSV.selectedId = copy.id
@@ -343,6 +414,13 @@ function EP.SaveAs()
   EP.SnapBaseline()
   EP.RebuildList()
   EP.LoadSelected(copy.id)
+
+  -- publish to library immediately (like SaveCurrent does)
+  if FRT.NoteNet and FRT.NoteNet.SendLibAdd then
+    local meta = { id=copy.id, version=copy.version, hash=copy.hash, title=copy.title, raid=copy.raid, boss=copy.boss }
+    FRT.NoteNet.SendLibAdd(meta, copy.text or "", (IsInGuild and IsInGuild() and "GUILD") or ((GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) and "RAID") or ((GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) and "PARTY") or nil)
+  end
+
   if EP.UpdateButtonsState then EP.UpdateButtonsState() end
 end
 
@@ -357,35 +435,45 @@ end
 
 function EP.CanShareNow()
   if not S.editorEnabled then return false end
-  local ed = S.editor
-  local txt = (ed and ed.GetText and ed.GetText()) or ""
-  if txt == "" then return false end
-  if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then return false end
-  if FRT.IsInRaid and FRT.IsInRaid() then
-    return (FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()) and true or false
-  end
-  if (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0 then return true end
+  if not S.currentId then return false end
+  local n = EP.FindNoteById(S.currentId); if not n then return false end
+  if not (FRT and FRT.NoteNet and FRT.NoteNet.SendRef) then return false end
+  -- channel check
+  if (GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) then return true end
+  if (GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) then return true end
   if IsInGuild and IsInGuild() then return true end
   return false
 end
 
 function EP.ShareCurrent()
   if not S.editorEnabled then return end
-  local ed = S.editor
-  local txt = (ed and ed.GetText and ed.GetText()) or ""
-  if txt == "" then if FRT.Print then FRT.Print("Nothing to share.") end return end
-  if not (FRT and FRT.NoteNet and FRT.NoteNet.Send) then
-    if FRT.Print then FRT.Print("Sharing unavailable (NoteNet not loaded).") end
-    return
+
+  -- If there are unsaved edits, save (this stamps version + hash and does LIBADD)
+  if EP.IsDirty and EP.IsDirty() then
+    EP.SaveCurrent()
   end
-  if (GetNumRaidMembers() or 0) > 0 then
-    FRT.NoteNet.Send(txt, "RAID");  if FRT.Print then FRT.Print("Shared to RAID.") end
-  elseif (GetNumPartyMembers() or 0) > 0 then
-    FRT.NoteNet.Send(txt, "PARTY"); if FRT.Print then FRT.Print("Shared to PARTY.") end
-  elseif IsInGuild and IsInGuild() then
-    FRT.NoteNet.Send(txt, "GUILD"); if FRT.Print then FRT.Print("Shared to GUILD.") end
-  else
-    if FRT.Print then FRT.Print("You are not in a group.") end
+
+  if not S.currentId then if FRT.Print then FRT.Print("No note selected.") end return end
+  local n = EP.FindNoteById(S.currentId); if not n then return end
+  local meta = {
+    id      = n.id,
+    version = tonumber(n.version) or 1,
+    hash    = n.hash or Hash16(n.text or ""),
+    title   = n.title or "",
+    raid    = n.raid  or "",
+    boss    = n.boss  or "",
+  }
+
+  local ch = PickChannel()
+  if not ch then if FRT.Print then FRT.Print("No group channel available for broadcast.") end return end
+
+  if FRT.NoteNet and FRT.NoteNet.SendRef then
+    FRT.NoteNet.SendRef(meta, ch)
+    -- keep scratch in sync with what we just referenced
+    FRT_Saved.note = n.text or ""
+    if FRT.Print then
+      FRT.Print(string.format("Broadcasted REF to %s: %s", ch, (meta.title ~= "" and meta.title) or "(untitled)"))
+    end
   end
 end
 

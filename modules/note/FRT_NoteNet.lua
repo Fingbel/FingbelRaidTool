@@ -1,5 +1,3 @@
--- Fingbel Raid Tool - NoteNet
-
 FRT = FRT or {}
 FRT.NoteNet = FRT.NoteNet or {}
 
@@ -12,15 +10,16 @@ do
   ------------- Config ------------
   --===============================
   local PREFIX          = FRT.ADDON_PREFIX or "FRT"
-  local FRAME_TAG       = "N"        -- first byte/tag
-  local SEP             = "\t"       -- separator 
+  local FRAME_TAG       = "N"
+  local SEP             = "\t"
   local MAX_LEN         = 240
   local SEND_STEP       = 0.20
   local CLEAN_AFTER     = 30
 
-  -- Worst-case header for budget: "N\tv1\tID=999999\tS=999/999\tC=FFFF\t"
+  -- Magic marker for typed payloads living *inside* the payload body.
+  local TYPED_MAGIC     = "FRTN|"
+
   local HEADER_WORST   = string.len(FRAME_TAG..SEP.."v1"..SEP.."ID=999999"..SEP.."S=999/999"..SEP.."C=FFFF"..SEP)
-  -- Leave extra headroom for payload encoding 
   local PAYLOAD_BUDGET = (MAX_LEN - HEADER_WORST) - 16
   if PAYLOAD_BUDGET < 32 then PAYLOAD_BUDGET = 32 end
 
@@ -50,13 +49,11 @@ do
   ----- Payload encoding  ---------
   --===============================
   local function encPayload(s)
-    -- escape order matters: escape '~' first
     s = string.gsub(s or "", "~", "~~")
     s = string.gsub(s, "|", "~p")
     return s
   end
   local function decPayload(s)
-    -- unescape order: '~p' -> '|', then '~~' -> '~'
     s = string.gsub(s or "", "~p", "|")
     s = string.gsub(s, "~~", "~")
     return s
@@ -69,24 +66,18 @@ do
     local ranges = {}
     local i = 1
     while true do
-      local a, b = string.find(s, "%b{}", i)
-      if not a then break end
-      ranges[table.getn(ranges) + 1] = { a = a, b = b }
-      i = b + 1
+      local a, b = string.find(s, "%b{}", i); if not a then break end
+      ranges[table.getn(ranges) + 1] = { a = a, b = b }; i = b + 1
     end
     i = 1
     while true do
-      local a, b = string.find(s, "%[color=#%x%x%x%x%x%x%]", i)
-      if not a then break end
-      ranges[table.getn(ranges) + 1] = { a = a, b = b }
-      i = b + 1
+      local a, b = string.find(s, "%[color=#%x%x%x%x%x%x%]", i); if not a then break end
+      ranges[table.getn(ranges) + 1] = { a = a, b = b }; i = b + 1
     end
     i = 1
     while true do
-      local a, b = string.find(s, "%[/color%]", i)
-      if not a then break end
-      ranges[table.getn(ranges) + 1] = { a = a, b = b }
-      i = b + 1
+      local a, b = string.find(s, "%[/color%]", i); if not a then break end
+      ranges[table.getn(ranges) + 1] = { a = a, b = b }; i = b + 1
     end
     table.sort(ranges, function(r1, r2) return r1.a < r2.a end)
     return ranges
@@ -167,7 +158,6 @@ do
     local id  = newId()
     local chk = tohex16(csum16(raw))
 
-    -- 1) Chunk on raw 
     local ranges = collectProtectedRanges(raw)
     local parts  = {}
     local i, n = 1, string.len(raw)
@@ -183,12 +173,10 @@ do
     if table.getn(parts) == 0 then parts[1] = "" end
     local total = table.getn(parts)
 
-    -- 2) Send frames (tab-separated header, encoded payload)
     for seq = 1, total do
       local header = FRAME_TAG..SEP.."v1"..SEP.."ID="..id..SEP.."S="..seq.."/"..total..SEP.."C="..chk..SEP
       local payload = encPayload(parts[seq])
       local msg = header .. payload
-      -- Just-in-case fit check; if oversized, shrink by backing off a bit (won't break tags, worst-case re-send next call)
       if string.len(msg) > MAX_LEN then
         local room = MAX_LEN - string.len(header)
         payload = string.sub(payload, 1, room)
@@ -199,6 +187,58 @@ do
 
     return { id = id, total = total, checksum = chk }
   end
+
+  -- Convenience: compute a tiny content hash for versioning (16-bit for now).
+  function Net.Hash16(s) return tohex16(csum16(tostring(s or ""))) end
+
+  -- High-level typed senders -----------------------------------------------
+
+  -- REF broadcast: "FRTN|REF|id|ver|hash|title|raid|boss"
+  function Net.SendRef(meta, channel, target)
+    local payload = TYPED_MAGIC.."REF|"..
+      tostring(meta.id or "").."|"..
+      tostring(meta.version or 1).."|"..
+      tostring(meta.hash or "").."|"..
+      tostring(meta.title or "").."|"..
+      tostring(meta.raid or "").."|"..
+      tostring(meta.boss or "")
+    return Net.Send(payload, channel, target)
+  end
+
+  -- REQ (whisper): "FRTN|REQ|id|wantVer"
+  function Net.SendReq(id, wantVersion, targetOrChannel)
+  local payload = TYPED_MAGIC.."REQ|"..tostring(id or "").."|"..tostring(wantVersion or 0)
+  if isGroupChannel(targetOrChannel) then
+    return Net.Send(payload, targetOrChannel)          -- broadcast REQ on group channel
+  else
+    return Net.Send(payload, "WHISPER", targetOrChannel) -- legacy usage still works
+  end
+end
+
+  -- NOTE (typically whisper): "FRTN|NOTE|id|ver|hash|title|raid|boss|<body...>"
+  function Net.SendNote(meta, text, channel, target)
+    local head = TYPED_MAGIC.."NOTE|"..
+      tostring(meta.id or "").."|"..
+      tostring(meta.version or 1).."|"..
+      tostring(meta.hash or "").."|"..
+      tostring(meta.title or "").."|"..
+      tostring(meta.raid or "").."|"..
+      tostring(meta.boss or "").."|"
+    local payload = head .. tostring(text or "")
+    return Net.Send(payload, channel, target)
+  end
+
+  function Net.SendLibAdd(meta, text, channel, target)
+  local head = "FRTN|LIBADD|"..
+    tostring(meta.id or "").."|"..
+    tostring(meta.version or 1).."|"..
+    tostring(meta.hash or "").."|"..
+    tostring(meta.title or "").."|"..
+    tostring(meta.raid or "").."|"..
+    tostring(meta.boss or "").."|"
+  local payload = head .. tostring(text or "")
+  return Net.Send(payload, channel, target)
+end
 
   --===============================
   ---- Receiver / reassembly ------
@@ -213,6 +253,63 @@ do
     end
   end
 
+  -- Parse typed payloads once fully reassembled & decoded.
+  local function handleTyped(sender, raw,channel)
+    if string.sub(raw or "", 1, string.len(TYPED_MAGIC)) ~= TYPED_MAGIC then return false end
+
+    -- Split first 7 separators max; the NOTE body may contain '|' freely.
+    local function splitFields(s, count)
+      local out, idx, start = {}, 0, 1
+      while idx < count do
+        local a, b = string.find(s, "|", start, true)
+        if not a then out[idx+1] = string.sub(s, start); return out end
+        out[idx+1] = string.sub(s, start, a-1)
+        start = b + 1
+        idx = idx + 1
+      end
+      out[idx+1] = string.sub(s, start)
+      return out
+    end
+
+    local rest = string.sub(raw, string.len(TYPED_MAGIC) + 1)
+    local a1 = string.find(rest, "|", 1, true)
+    if not a1 then return false end
+    local typ = string.sub(rest, 1, a1 - 1)
+    local data = string.sub(rest, a1 + 1)
+
+    if typ == "REF" then
+    local f = splitFields(data, 6)
+      if FRT.NoteNet.onRef then
+        FRT.NoteNet.onRef(sender, {
+          id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
+          title=f[4] or "", raid=f[5] or "", boss=f[6] or ""
+        }, channel)
+      end
+      return true
+    elseif typ == "REQ" then
+      local f = splitFields(data, 2)
+      if FRT.NoteNet.onReq then
+        FRT.NoteNet.onReq(sender, { id=f[1] or "", wantVersion=tonumber(f[2]) or 0 }, channel)
+      end
+      return true
+    elseif typ == "NOTE" then
+      local f = splitFields(data, 6)
+      local meta = { id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
+                    title=f[4] or "", raid=f[5] or "", boss=f[6] or "" }
+      local body = f[7] or ""
+      if FRT.NoteNet.onNote then FRT.NoteNet.onNote(sender, meta, body, channel) end
+      return true
+    elseif typ == "LIBADD" then
+      local f = splitFields(data, 6)
+      local meta = { id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
+                    title=f[4] or "", raid=f[5] or "", boss=f[6] or "" }
+      local body = f[7] or ""
+      if FRT.NoteNet.onLibAdd then FRT.NoteNet.onLibAdd(sender, meta, body, channel) end
+      return true
+    end
+    return false
+  end
+
   local function tryEmit(k, sender)
     local as = assemblies[k]; if not as or as.got ~= as.total then return end
     local buf = {}
@@ -221,6 +318,11 @@ do
     local raw = decPayload(encAll)
     if tohex16(csum16(raw)) ~= (as.chk or "") then assemblies[k] = nil; return end
     assemblies[k] = nil
+
+    -- New: intercept typed messages first.
+    if handleTyped(sender, raw) then return end
+
+    -- Legacy: plain note body
     if Net.onNoteReceived then Net.onNoteReceived(sender, raw, { id = as.id, total = as.total, checksum = as.chk }) end
   end
 
@@ -229,40 +331,35 @@ do
   rx:SetScript("OnEvent", function()
     if event ~= "CHAT_MSG_ADDON" then return end
     local prefix, msg, channel, sender = arg1, arg2, arg3, arg4
-    if prefix ~= PREFIX then return end
+    if prefix ~= (FRT.ADDON_PREFIX or "FRT") then return end
     if type(msg) ~= "string" then return end
     if string.sub(msg, 1, 1) ~= FRAME_TAG then return end
 
-    -- Parse "N\tv1\tID=..\tS=seq/total\tC=chk\t<encoded-payload>"
-    local _, p1 = string.find(msg, "^"..FRAME_TAG..SEP.."v1"..SEP.."ID=")
-    if not p1 then return end
     local a1, b1, id = string.find(msg, "^"..FRAME_TAG..SEP.."v1"..SEP.."ID=([0-9]+)"..SEP)
     if not a1 then return end
     local pat2 = "^"..FRAME_TAG..SEP.."v1"..SEP.."ID="..id..SEP.."S=([0-9]+)/([0-9]+)"..SEP
-    local a2, b2, seq, total = string.find(msg, pat2)
-    if not a2 then return end
+    local a2, b2, seq, total = string.find(msg, pat2); if not a2 then return end
     local pat3 = "^"..FRAME_TAG..SEP.."v1"..SEP.."ID="..id..SEP.."S="..seq.."/"..total..SEP.."C=([0-9A-Fa-f]+)"..SEP
-    local a3, b3, chk = string.find(msg, pat3)
-    if not a3 then return end
+    local a3, b3, chk = string.find(msg, pat3); if not a3 then return end
 
     local payload = string.sub(msg, (b3 or 0) + 1)
     seq   = tonumber(seq) or 0
     total = tonumber(total) or 0
     if seq < 1 or total < 1 or seq > total then return end
 
-    local k = keyOf(sender, id)
-    local as = assemblies[k]
-    if not as then
-      as = { id = id, total = total, chk = string.upper(chk or ""), parts = {}, got = 0, startedAt = GetTime() }
-      assemblies[k] = as
-    end
-    if not as.parts[seq] then
-      as.parts[seq] = payload
-      as.got = as.got + 1
-    end
-    tryEmit(k, sender)
+    local key = sender..":"..id
+    local as = assemblies[key]
+    if not as then as = { id = id, total = total, chk = string.upper(chk or ""), parts = {}, got = 0, startedAt = GetTime() }; assemblies[key] = as end
+    if not as.parts[seq] then as.parts[seq] = payload; as.got = as.got + 1 end
+    tryEmit(key, sender)
     cleanupOld()
   end)
 
+  -- New typed callbacks (assigned by NoteCore)
+  Net.onRef  = Net.onRef  or nil
+  Net.onReq  = Net.onReq  or nil
+  Net.onNote = Net.onNote or nil
+
+  -- Legacy raw callback stays:
   Net.onNoteReceived = Net.onNoteReceived or nil
 end

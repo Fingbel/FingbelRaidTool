@@ -1,4 +1,5 @@
 -- Fingbel Raid Tool - Shared Data 
+--FRT_Data.lua 
 
 FRT      = FRT or {}
 FRT.Data = FRT.Data or {}

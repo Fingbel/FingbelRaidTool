@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool — Note Editor Pane (State)
--- State container + dirty/baseline + blocker helpers
+--FRT_NoteEditorPane.State.lua --
 
 local FRT = FRT
 local EP = FRT.Note.EditorPane
