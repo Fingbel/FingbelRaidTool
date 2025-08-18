@@ -394,7 +394,7 @@ function EP.Build(parent)
     for i=1, table.getn(ordered) do
       local classKey = ordered[i].key
       local b = MakeClassButton(classBar, classKey, last, 2)
-      local tag = "{class:" .. classKey .. "}"
+      local tag = "{" .. string.upper(classKey) .. "}"
 
       do
         local hex = D and D.ClassColorsHex and D.ClassColorsHex[classKey]
