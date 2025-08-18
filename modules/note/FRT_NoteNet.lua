@@ -133,11 +133,10 @@ do
     sendQ[n] = nil
 
     FRT.RegisterAddonPrefix()
-    if job.channel == "WHISPER" and job.target then
-      SendAddonMessage(PREFIX, job.msg, "WHISPER", job.target)
-    else
-      SendAddonMessage(PREFIX, job.msg, job.channel or "RAID")
-    end
+
+    -- Only allow group channels; fall back to RAID.
+    local ch = (job.channel == "GUILD" or job.channel == "RAID" or job.channel == "PARTY") and job.channel or "RAID"
+    SendAddonMessage(PREFIX, job.msg, ch)
   end)
   local function enqueue(msg, channel, target)
     sendQ[table.getn(sendQ) + 1] = { msg = msg, channel = channel or "RAID", target = target }
@@ -207,11 +206,15 @@ do
   end
 
   -- REQ (whisper): "FRTN|REQ|id|wantVer"
-  function Net.SendReq(id, wantVersion, targetName)
-    if not targetName or targetName == "" then return end
-    local payload = TYPED_MAGIC.."REQ|"..tostring(id or "").."|"..tostring(wantVersion or 0)
-    return Net.Send(payload, "WHISPER", targetName)
-  end
+  function Net.SendReq(id, wantVersion, _targetName)
+  local payload = TYPED_MAGIC.."REQ|"..tostring(id or "").."|"..tostring(wantVersion or 0)
+  local ch = (EP and EP.GetSelectedChannel and EP.GetSelectedChannel())
+             or (IsInGuild and IsInGuild() and "GUILD")
+             or ((GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) and "RAID")
+             or ((GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) and "PARTY")
+             or "RAID"
+  return Net.Send(payload, ch)
+end
 
   -- NOTE (typically whisper): "FRTN|NOTE|id|ver|hash|title|raid|boss|<body...>"
   function Net.SendNote(meta, text, channel, target)

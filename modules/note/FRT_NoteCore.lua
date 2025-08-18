@@ -15,7 +15,14 @@ local function EnsureSaved()
 
   FRT_Saved.ui = FRT_Saved.ui or {}
   FRT_Saved.ui.mainEditor = FRT_Saved.ui.mainEditor or { x=nil, y=nil, w=800, h=500, selected=nil }
-  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {}, sourceFilter = "All", scopeFilter = "All" }
+ FRT_Saved.ui.notes = FRT_Saved.ui.notes or {
+  selectedRaid = "Custom/Misc",
+  selectedId   = nil,
+  selectedBossByRaid = {},
+  sourceFilter = "All",
+  scopeFilter  = "All",
+  broadcastChannel = nil,  -- NEW: user-picked channel
+}
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
   FRT_Saved.ui.viewer = FRT_Saved.ui.viewer or { autoOpen = true, locked = false }
 end
@@ -90,11 +97,8 @@ local function WireNoteNetCallback()
         if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
         if FRT_Saved.ui.viewer.autoOpen and FRT.Note and FRT.Note.ShowViewer then FRT.Note.ShowViewer() end
       else
-        FRT_Saved.note = string.format("[FRT] Fetching “%s”…", (meta.title and meta.title ~= "" and meta.title) or (meta.id or "?"))
+        FRT_Saved.note = string.format("[FRT] Waiting for note “%s”…", (meta.title and meta.title ~= "" and meta.title) or (meta.id or "?"))
         if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
-        if FRT.NoteNet and FRT.NoteNet.SendReq then
-          FRT.NoteNet.SendReq(meta.id, meta.version, sender)
-        end
       end
     end
 
@@ -143,13 +147,18 @@ local function WireNoteNetCallback()
       local src
       for i = 1, table.getn(arr) do local n = arr[i]; if n and n.id == wanted then src = n; break end end
       if not src then return end
+
       local hash = src.hash or Hash16(src.text or "")
       local ver  = src.version or 1
-      if FRT.NoteNet.SendNote then
+      local outCh = inChan or (EP and EP.GetSelectedChannel and EP.GetSelectedChannel()) or (IsInGuild and IsInGuild() and "GUILD")
+                    or ((GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) and "RAID")
+                    or ((GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) and "PARTY")
+                    or nil
+      if outCh and FRT.NoteNet.SendNote then
         FRT.NoteNet.SendNote({
           id = src.id, version = ver, hash = hash,
           title = src.title or "", raid = src.raid or "", boss = src.boss or ""
-        }, src.text or "", "WHISPER", requester)
+        }, src.text or "", outCh)
       end
     end
 
@@ -198,13 +207,15 @@ local function DoBroadcastRefById(id, channel)
     id = n.id, version = n.version or 1, hash = n.hash or Hash16(n.text or ""),
     title = n.title or "", raid = n.raid or "", boss = n.boss or ""
   }
-  local ch = channel or AutoShareChannel()
+  local ch = channel or (EP and EP.GetSelectedChannel and EP.GetSelectedChannel()) or AutoShareChannel()
   if not ch then if FRT.Print then FRT.Print("No channel.") end return true end
   if FRT.NoteNet and FRT.NoteNet.SendRef then
     FRT.NoteNet.SendRef(meta, ch)
-    FRT_Saved.note = n.text or ""   -- show what we just referenced
+    -- Optional: also ship the body for clients without the library copy yet
+    if FRT.NoteNet.SendNote then FRT.NoteNet.SendNote(meta, n.text or "", ch) end
+    FRT_Saved.note = n.text or ""
     if Note.UpdateViewerText then Note.UpdateViewerText(Note) end
-    if FRT.Print then FRT.Print("Broadcasted REF: "..(meta.title ~= "" and meta.title or "(untitled)")) end
+    if FRT.Print then FRT.Print("Broadcasted REF to "..ch..": "..(meta.title ~= "" and meta.title or "(untitled)")) end
   end
   return true
 end

@@ -50,3 +50,5 @@ modules\checker\FRT_CheckerViewer.lua
 modules\checker\FRT_CheckerRegistry.lua
 modules\checker\FRT_CheckerColumns.lua
 modules\checker\FRT_CheckerScan.lua
+
+FRT_Debug.lua

@@ -18,10 +18,66 @@ function EP.EnsureSaved()
     selectedBossByRaid = {},
     sourceFilter = "All",
     scopeFilter  = "All",
+    broadcastChannel = nil,  -- NEW
   }
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
   FRT_Saved.ui.notes.sourceFilter = FRT_Saved.ui.notes.sourceFilter or "All"
   FRT_Saved.ui.notes.scopeFilter  = FRT_Saved.ui.notes.scopeFilter  or FRT_Saved.ui.notes.sourceFilter or "All"
+end
+-- ===== Channel helpers  =====
+local function ChannelAvailable(kind)
+  if kind == "GUILD" then return IsInGuild and IsInGuild() end
+  if kind == "RAID"  then return GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0 end
+  if kind == "PARTY" then return GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0 end
+  return false
+end
+
+function EP.GetSelectedChannel()
+  local saved = FRT_Saved and FRT_Saved.ui and FRT_Saved.ui.notes and FRT_Saved.ui.notes.broadcastChannel
+  if saved and ChannelAvailable(saved) then return saved end
+  if ChannelAvailable("GUILD") then return "GUILD" end
+  if ChannelAvailable("RAID")  then return "RAID"  end
+  if ChannelAvailable("PARTY") then return "PARTY" end
+  return nil
+end
+
+function EP.ApplyChannel(kind)
+  if not kind then return end
+  if not (FRT_Saved and FRT_Saved.ui and FRT_Saved.ui.notes) then return end
+  FRT_Saved.ui.notes.broadcastChannel = kind
+  if S.channelDD then
+    UIDropDownMenu_SetSelectedValue(S.channelDD, kind)
+    UIDropDownMenu_SetText(kind, S.channelDD)
+  end
+  if EP.UpdateButtonsState then EP.UpdateButtonsState() end
+end
+
+function EP.RebuildChannelDropdown()
+  if not S.channelDD then return end
+  EP.EnsureDropDownListFrames()
+  UIDropDownMenu_Initialize(S.channelDD, function()
+    local opts = { "GUILD", "RAID", "PARTY" }
+    local sel  = EP.GetSelectedChannel()
+    for i=1, table.getn(opts) do
+      local k = opts[i]
+      local info = {}
+      info.text  = k
+      info.value = k
+      info.func  = function()
+        if ChannelAvailable(k) then
+          EP.ApplyChannel(k)
+        else
+          if FRT.Print then FRT.Print(k.." not available.") end
+        end
+      end
+      info.disabled = not ChannelAvailable(k)
+      info.checked  = (sel == k)
+      UIDropDownMenu_AddButton(info)
+    end
+  end)
+  local sel = EP.GetSelectedChannel()
+  UIDropDownMenu_SetSelectedValue(S.channelDD, sel)
+  UIDropDownMenu_SetText(sel or "—", S.channelDD)
 end
 
 -- Channel selection (prefers guild, then raid, then party)
@@ -451,7 +507,7 @@ function EP.SaveCurrent()
       raid    = noteRef.raid  or "",
       boss    = noteRef.boss  or "",
     }
-    local ch = PickChannel()
+    local ch = EP.GetSelectedChannel and EP.GetSelectedChannel() or nil
     if ch then
       FRT.NoteNet.SendLibAdd(meta, noteRef.text or "", ch)
     end
@@ -529,13 +585,9 @@ end
 function EP.CanShareNow()
   if not S.editorEnabled then return false end
   if not S.currentId then return false end
-  local n = EP.FindNoteById(S.currentId); if not n then return false end
   if not (FRT and FRT.NoteNet and FRT.NoteNet.SendRef) then return false end
-  -- channel check
-  if (GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) then return true end
-  if (GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) then return true end
-  if IsInGuild and IsInGuild() then return true end
-  return false
+  local ch = EP.GetSelectedChannel and EP.GetSelectedChannel() or nil
+  return ch ~= nil
 end
 
 function EP.ShareCurrent()
@@ -557,16 +609,20 @@ function EP.ShareCurrent()
     boss    = n.boss  or "",
   }
 
-  local ch = PickChannel()
+  local ch = EP.GetSelectedChannel and EP.GetSelectedChannel() or nil
   if not ch then if FRT.Print then FRT.Print("No group channel available for broadcast.") end return end
 
   if FRT.NoteNet and FRT.NoteNet.SendRef then
     FRT.NoteNet.SendRef(meta, ch)
-    -- keep scratch in sync with what we just referenced
-    FRT_Saved.note = n.text or ""
-    if FRT.Print then
-      FRT.Print(string.format("Broadcasted REF to %s: %s", ch, (meta.title ~= "" and meta.title) or "(untitled)"))
-    end
+  end
+  if FRT.NoteNet and FRT.NoteNet.SendNote then
+    FRT.NoteNet.SendNote(meta, n.text or "", ch)  -- NEW: send body to channel
+  end
+
+  -- keep scratch in sync with what we just referenced
+  FRT_Saved.note = n.text or ""
+  if FRT.Print then
+    FRT.Print(string.format("Broadcasted REF+NOTE to %s: %s", ch, (meta.title ~= "" and meta.title) or "(untitled)"))
   end
 end
 

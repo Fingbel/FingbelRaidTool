@@ -131,6 +131,17 @@ function EP.Build(parent)
   bottomBar:SetHeight(40)
   S.bottomBar = bottomBar
 
+  -- Channel label + dropdown (inside bottomBar)
+  local chLabel = bottomBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  chLabel:SetPoint("LEFT", btnDel, "RIGHT", 12, 0)
+  chLabel:SetText("Channel:")
+
+  local chDD = CreateFrame("Frame", "FRT_BroadcastChannel_DD", bottomBar, "UIDropDownMenuTemplate")
+  chDD:SetPoint("LEFT", chLabel, "RIGHT", -6, 2)
+  UIDropDownMenu_SetWidth(100, chDD)
+  UIDropDownMenu_JustifyText("LEFT", chDD)
+  S.channelDD = chDD
+
   -- ===== Left column =====
   local leftColumn = CreateFrame("Frame", "FRT_NoteLeftColumn", parent)
   leftColumn:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -15)
@@ -583,6 +594,7 @@ function EP.Build(parent)
   watch:RegisterEvent("RAID_ROSTER_UPDATE")
   watch:RegisterEvent("GUILD_ROSTER_UPDATE")
   watch:SetScript("OnEvent", function()
+    if EP.RebuildChannelDropdown then EP.RebuildChannelDropdown() end
     if EP.UpdateButtonsState then EP.UpdateButtonsState() end
   end)
 
