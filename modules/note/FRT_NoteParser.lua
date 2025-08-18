@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool - Parser
---FRT_NoteParser.lua --
+-- FRT_NoteParser.lua
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
@@ -9,15 +9,37 @@ do
   local Parser = FRT.Note.Parser
 
   local D = FRT.Data or {}
-  local RT_TEXTURE   = D.RaidTargets and D.RaidTargets.TEXTURE or "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
-  local RT_TEXCOORD  = D.RaidTargets and D.RaidTargets.COORDS   or {}
-  local CLASS_TEX    = D.ClassIcons and D.ClassIcons.TEXTURE    or "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
-  local CLASS_TEXCOORD = D.ClassIcons and D.ClassIcons.COORDS   or {}
-  local CLASS_HEX    = D.ClassColorsHex or {}
+  local RT_TEXTURE       = D.RaidTargets and D.RaidTargets.TEXTURE or "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+  local RT_TEXCOORD      = D.RaidTargets and D.RaidTargets.COORDS   or {}
+  local CLASS_TEX        = D.ClassIcons and D.ClassIcons.TEXTURE    or "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+  local CLASS_TEXCOORD   = D.ClassIcons and D.ClassIcons.COORDS     or {}
+  local CLASS_HEX        = D.ClassColorsHex or {}
+  local ROLE_HEX         = D.RoleColorsHex or {}
+  local ROLE_SYNONYMS    = D.RoleSynonyms or {}
+  local NEUTRAL_HEX      = D.PlaceholderNeutralHex or "FFD100" -- gold
 
-local function hex2rgb(hex)
-  return (D.HexToRGB and D.HexToRGB(hex)) or {1,1,1}
-end
+  local function hex2rgb(hex)
+    return (D.HexToRGB and D.HexToRGB(hex)) or {1,1,1}
+  end
+
+  local function colorForPlaceholder(key)
+    local up = string.upper(tostring(key or ""))
+    -- class placeholder (e.g., {MAGE1})
+    if CLASS_HEX[up] then
+      return hex2rgb(CLASS_HEX[up])
+    end
+    -- role placeholder (e.g., {TANK1}, {MT1}, {HEALER})
+    local norm = ROLE_SYNONYMS[up] or up
+    if ROLE_HEX[norm] then
+      return hex2rgb(ROLE_HEX[norm])
+    end
+    -- unknown/free-form placeholder -> gold
+    return hex2rgb(NEUTRAL_HEX)
+  end
+
+  local function isRoleToken(up)
+    return ROLE_HEX[up] ~= nil or ROLE_SYNONYMS[up] ~= nil
+  end
 
   local function pushText(tokens, text, color, font)
     if not text or text == "" then return end
@@ -50,8 +72,9 @@ end
   --  \n
   --  {rt1}..{rt8}
   --  [color=#RRGGBB] ... [/color]
-  --  {ClassName}                    -> class icon
-  --  [ClassName] ... [/ClassName]   -> class color span
+  --  {ClassName}                       -> class icon
+  --  [ClassName] ... [/ClassName]      -> class color span
+  --  {NAME#} / {ROLE#} / {ROLE}        -> placeholder (colored text, braces stripped)
   function Parser.Parse(text)
     local tokens = {}
     if type(text) ~= "string" or text == "" then return tokens end
@@ -76,25 +99,45 @@ end
       if ch == "\n" then
         flushBuf(); pushLine(tokens); i = i + 1
 
-      -- braces: {rtN} or {Class}
+      -- braces: {rtN} / placeholders / {Class}
       elseif ch == "{" then
         -- {rtN}
         local a,b,num = string.find(text, "^%{rt([1-8])%}", i)
         if a then
           flushBuf(); pushIcon(tokens, RT_TEXTURE, RT_TEXCOORD[tonumber(num)], 14, 14); i = b + 1
         else
-          -- {ClassName}
-          local ac, bc, cname = string.find(text, "^%{([%a]+)%}", i)
-          if ac then
-            local up = string.upper(cname or "")
-            if CLASS_TEXCOORD[up] then
-              flushBuf(); pushIcon(tokens, CLASS_TEX, CLASS_TEXCOORD[up], 14, 14); i = bc + 1
+          -- Placeholder with digits: {NAME123}
+          local ap, bp, pname, pnum = string.find(text, "^%{([%a]+)([0-9]+)%}", i)
+          if ap then
+            flushBuf()
+            local color = colorForPlaceholder(pname)
+            -- Display WITHOUT braces in preview
+            pushText(tokens, (pname or "") .. (pnum or ""), color, curFont)
+            i = bp + 1
+          else
+            -- Pure alpha token: could be role placeholder OR class icon OR unknown placeholder
+            local ac, bc, cname = string.find(text, "^%{([%a]+)%}", i)
+            if ac then
+              local up = string.upper(cname or "")
+              if isRoleToken(up) then
+                flushBuf()
+                local color = colorForPlaceholder(up)
+                -- role-only placeholder, no braces
+                pushText(tokens, cname, color, curFont)
+                i = bc + 1
+              elseif CLASS_TEXCOORD[up] then
+                -- class icon (e.g., {MAGE})
+                flushBuf(); pushIcon(tokens, CLASS_TEX, CLASS_TEXCOORD[up], 14, 14); i = bc + 1
+              else
+                -- unknown/free-form placeholder -> gold, no braces
+                flushBuf()
+                pushText(tokens, cname, colorForPlaceholder(up), curFont)
+                i = bc + 1
+              end
             else
-              -- unknown tag -> literal
+              -- not a token we recognize -> treat '{' literally
               buf = buf .. "{"; i = i + 1
             end
-          else
-            buf = buf .. "{"; i = i + 1
           end
         end
 

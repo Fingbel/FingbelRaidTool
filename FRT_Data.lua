@@ -1,5 +1,5 @@
--- Fingbel Raid Tool - Shared Data 
---FRT_Data.lua 
+-- Fingbel Raid Tool - Shared Data
+-- FRT_Data.lua
 
 FRT      = FRT or {}
 FRT.Data = FRT.Data or {}
@@ -40,6 +40,29 @@ D.ClassColorsHex = {
   DRUID  ="FF7D0A", HUNTER="ABD473", SHAMAN="0070DE",
   PRIEST ="FFFFFF", WARLOCK="9482C9", PALADIN="F58CBA",
 }
+
+--===============================
+-- Role colors (for placeholders)
+--===============================
+D.RoleColorsHex = {
+  TANK   = "3B82F6",  -- blue-ish
+  HEALER = "22C55E",  -- green
+  DPS    = "EF4444",  -- red
+  MELEE  = "F59E0B",  -- orange
+  RANGED = "8B5CF6",  -- purple
+}
+
+-- Common role synonyms -> canonical keys above
+D.RoleSynonyms = {
+  MT="TANK", OT="TANK", T="TANK",
+  HEAL="HEALER", HEALERS="HEALER", H="HEALER",
+  DPS="DPS", DD="DPS",
+  MDPS="MELEE", MELEE="MELEE", M="MELEE",
+  RDPS="RANGED", RANGED="RANGED", R="RANGED",
+}
+
+-- Unknown/custom placeholders use gold so authors see they were recognized.
+D.PlaceholderNeutralHex = "FFD100"
 
 -- Simple helper (Parser reuses it)
 function D.HexToRGB(hex)
