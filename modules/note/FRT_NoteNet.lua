@@ -1,3 +1,4 @@
+-- Fingbel Raid Tool - NoteNet (transport + framing + typed payloads)
 FRT = FRT or {}
 FRT.NoteNet = FRT.NoteNet or {}
 
@@ -206,14 +207,11 @@ do
   end
 
   -- REQ (whisper): "FRTN|REQ|id|wantVer"
-  function Net.SendReq(id, wantVersion, targetOrChannel)
-  local payload = TYPED_MAGIC.."REQ|"..tostring(id or "").."|"..tostring(wantVersion or 0)
-  if isGroupChannel(targetOrChannel) then
-    return Net.Send(payload, targetOrChannel)          -- broadcast REQ on group channel
-  else
-    return Net.Send(payload, "WHISPER", targetOrChannel) -- legacy usage still works
+  function Net.SendReq(id, wantVersion, targetName)
+    if not targetName or targetName == "" then return end
+    local payload = TYPED_MAGIC.."REQ|"..tostring(id or "").."|"..tostring(wantVersion or 0)
+    return Net.Send(payload, "WHISPER", targetName)
   end
-end
 
   -- NOTE (typically whisper): "FRTN|NOTE|id|ver|hash|title|raid|boss|<body...>"
   function Net.SendNote(meta, text, channel, target)
@@ -228,17 +226,18 @@ end
     return Net.Send(payload, channel, target)
   end
 
+  -- LIBADD (replicate saved note body into shared libs)
   function Net.SendLibAdd(meta, text, channel, target)
-  local head = "FRTN|LIBADD|"..
-    tostring(meta.id or "").."|"..
-    tostring(meta.version or 1).."|"..
-    tostring(meta.hash or "").."|"..
-    tostring(meta.title or "").."|"..
-    tostring(meta.raid or "").."|"..
-    tostring(meta.boss or "").."|"
-  local payload = head .. tostring(text or "")
-  return Net.Send(payload, channel, target)
-end
+    local head = TYPED_MAGIC.."LIBADD|"..
+      tostring(meta.id or "").."|"..
+      tostring(meta.version or 1).."|"..
+      tostring(meta.hash or "").."|"..
+      tostring(meta.title or "").."|"..
+      tostring(meta.raid or "").."|"..
+      tostring(meta.boss or "").."|"
+    local payload = head .. tostring(text or "")
+    return Net.Send(payload, channel, target)
+  end
 
   --===============================
   ---- Receiver / reassembly ------
@@ -254,10 +253,10 @@ end
   end
 
   -- Parse typed payloads once fully reassembled & decoded.
-  local function handleTyped(sender, raw,channel)
+  local function handleTyped(sender, raw, inChan)
     if string.sub(raw or "", 1, string.len(TYPED_MAGIC)) ~= TYPED_MAGIC then return false end
 
-    -- Split first 7 separators max; the NOTE body may contain '|' freely.
+    -- Split first N separators max; the NOTE body may contain '|' freely.
     local function splitFields(s, count)
       local out, idx, start = {}, 0, 1
       while idx < count do
@@ -278,39 +277,47 @@ end
     local data = string.sub(rest, a1 + 1)
 
     if typ == "REF" then
-    local f = splitFields(data, 6)
+      local f = splitFields(data, 6) -- id|ver|hash|title|raid|boss
       if FRT.NoteNet.onRef then
         FRT.NoteNet.onRef(sender, {
           id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
           title=f[4] or "", raid=f[5] or "", boss=f[6] or ""
-        }, channel)
+        }, inChan)
       end
       return true
+
     elseif typ == "REQ" then
-      local f = splitFields(data, 2)
+      local f = splitFields(data, 2) -- id|wantVer
       if FRT.NoteNet.onReq then
-        FRT.NoteNet.onReq(sender, { id=f[1] or "", wantVersion=tonumber(f[2]) or 0 }, channel)
+        FRT.NoteNet.onReq(sender, { id=f[1] or "", wantVersion=tonumber(f[2]) or 0 }, inChan)
       end
       return true
+
     elseif typ == "NOTE" then
+      -- id|ver|hash|title|raid|boss|<body...>
       local f = splitFields(data, 6)
-      local meta = { id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
-                    title=f[4] or "", raid=f[5] or "", boss=f[6] or "" }
+      local meta = {
+        id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
+        title=f[4] or "", raid=f[5] or "", boss=f[6] or ""
+      }
       local body = f[7] or ""
-      if FRT.NoteNet.onNote then FRT.NoteNet.onNote(sender, meta, body, channel) end
+      if FRT.NoteNet.onNote then FRT.NoteNet.onNote(sender, meta, body, inChan) end
       return true
+
     elseif typ == "LIBADD" then
       local f = splitFields(data, 6)
-      local meta = { id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
-                    title=f[4] or "", raid=f[5] or "", boss=f[6] or "" }
+      local meta = {
+        id=f[1] or "", version=tonumber(f[2]) or 1, hash=f[3] or "",
+        title=f[4] or "", raid=f[5] or "", boss=f[6] or ""
+      }
       local body = f[7] or ""
-      if FRT.NoteNet.onLibAdd then FRT.NoteNet.onLibAdd(sender, meta, body, channel) end
+      if FRT.NoteNet.onLibAdd then FRT.NoteNet.onLibAdd(sender, meta, body, inChan) end
       return true
     end
     return false
   end
 
-  local function tryEmit(k, sender)
+  local function tryEmit(k, sender, inChan)
     local as = assemblies[k]; if not as or as.got ~= as.total then return end
     local buf = {}
     for i = 1, as.total do buf[i] = as.parts[i] or "" end
@@ -320,7 +327,7 @@ end
     assemblies[k] = nil
 
     -- New: intercept typed messages first.
-    if handleTyped(sender, raw) then return end
+    if handleTyped(sender, raw, inChan) then return end
 
     -- Legacy: plain note body
     if Net.onNoteReceived then Net.onNoteReceived(sender, raw, { id = as.id, total = as.total, checksum = as.chk }) end
@@ -351,7 +358,7 @@ end
     local as = assemblies[key]
     if not as then as = { id = id, total = total, chk = string.upper(chk or ""), parts = {}, got = 0, startedAt = GetTime() }; assemblies[key] = as end
     if not as.parts[seq] then as.parts[seq] = payload; as.got = as.got + 1 end
-    tryEmit(key, sender)
+    tryEmit(key, sender, channel)
     cleanupOld()
   end)
 

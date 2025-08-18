@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool — Note Editor Pane (UI)
---FRT_NoteEditorPane.UI.lua --
+-- FRT_NoteEditorPane.UI.lua
 
 local FRT = FRT
 local EP  = FRT.Note.EditorPane
@@ -8,6 +8,80 @@ local S   = EP.state
 local function EnsureViewerVisible()
   if FRT.Note and FRT.Note.EnsureViewer then FRT.Note.EnsureViewer() end
   if FRT.Note and FRT.Note.ShowViewer   then FRT.Note.ShowViewer() end
+end
+
+-- ==== Origin filter (UI helpers & safe defaults) ============================
+-- If Logic already provides ApplyOriginFilter/RebuildOriginFilterDropdown,
+-- we won't overwrite them. Otherwise we define minimal UI-safe versions here.
+
+if not EP.ApplyOriginFilter then
+  function EP.ApplyOriginFilter(val)
+    S.currentOriginFilter = val or "Any"
+    if S.uiSV then S.uiSV.originFilter = S.currentOriginFilter end
+
+    if S.originDD then
+      -- Guard all UIDropDownMenu calls
+      UIDropDownMenu_SetSelectedValue(S.originDD, S.currentOriginFilter)
+      UIDropDownMenu_SetText(S.currentOriginFilter, S.originDD)
+    end
+
+    if EP.RebuildList then EP.RebuildList() end
+
+    local filtered = (EP.GetFilteredNotes and EP.GetFilteredNotes()) or {}
+    if table.getn(filtered) == 0 then
+      S.currentId = nil; if S.uiSV then S.uiSV.selectedId = nil end
+      if EP.LoadSelected then EP.LoadSelected(nil) end
+    else
+      local found = false
+      for i=1, table.getn(filtered) do
+        if filtered[i].id == S.currentId then found = true; break end
+      end
+      if not found then
+        S.currentId = filtered[1].id; if S.uiSV then S.uiSV.selectedId = S.currentId end
+        if EP.LoadSelected then EP.LoadSelected(S.currentId) end
+      end
+    end
+
+    if EP.UpdateButtonsState then EP.UpdateButtonsState() end
+  end
+end
+
+local function InitOriginFilterDropdown()
+  local options = { "Any", "Mine", "Guild", "Outside" }
+  for i=1, table.getn(options) do
+    local val = options[i]
+    local info = {}
+    info.text  = val
+    info.value = val
+    info.func  = function()
+      if EP.IsDirty and EP.IsDirty() then
+        S.pending.originFilter = val
+        if EP.ShowBlocker then EP.ShowBlocker() end
+        StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
+      else
+        EP.ApplyOriginFilter(val)
+      end
+    end
+    info.checked = (S.currentOriginFilter == val)
+    UIDropDownMenu_AddButton(info)
+  end
+end
+
+if not EP.RebuildOriginFilterDropdown then
+  function EP.RebuildOriginFilterDropdown()
+    -- SAFETY: bail out if the frame isn’t built yet
+    if not (S and S.originDD) then return end
+    EP.EnsureDropDownListFrames()
+    UIDropDownMenu_Initialize(S.originDD, InitOriginFilterDropdown)
+
+    local v = S.currentOriginFilter
+    if v ~= "Any" and v ~= "Mine" and v ~= "Guild" and v ~= "Outside" then
+      S.currentOriginFilter = "Any"
+    end
+    -- These are safe now because S.originDD exists
+    UIDropDownMenu_SetSelectedValue(S.originDD, S.currentOriginFilter)
+    UIDropDownMenu_SetText(S.currentOriginFilter, S.originDD)
+  end
 end
 
 function EP.Build(parent)
@@ -25,9 +99,10 @@ function EP.Build(parent)
     selRaid = EP.FirstRaidName()
     S.uiSV.selectedRaid = selRaid
   end
-  S.currentRaid       = selRaid
-  S.currentId         = S.uiSV.selectedId or nil
-  S.currentBossFilter = S.uiSV.selectedBossByRaid[S.currentRaid] or "All"
+  S.currentRaid         = selRaid
+  S.currentId           = S.uiSV.selectedId or nil
+  S.currentBossFilter   = S.uiSV.selectedBossByRaid[S.currentRaid] or "All"
+  S.currentOriginFilter = S.uiSV.originFilter or "Any"   -- NEW
 
   -- ===== Header =====
   local header = CreateFrame("Frame", "FRT_NoteEditor_Header", parent)
@@ -115,9 +190,25 @@ function EP.Build(parent)
   UIDropDownMenu_JustifyText("LEFT", bossFilterDD)
   S.bossDD = bossFilterDD
 
+  -- Source filter bar (below Boss)
+  local sourceBar = CreateFrame("Frame", "FRT_SourceFilterBar", filterBar)
+  sourceBar:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", 0, -6)
+  sourceBar:SetPoint("TOPRIGHT", filterBar, "BOTTOMRIGHT", 0, -6)
+  sourceBar:SetHeight(22)
+
+  local sourceLabel = sourceBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  sourceLabel:SetPoint("LEFT", 0, 0)
+  sourceLabel:SetText("Source:")
+
+  local sourceDD = CreateFrame("Frame", "FRT_NoteFilter_SourceDropDown", sourceBar, "UIDropDownMenuTemplate")
+  sourceDD:SetPoint("LEFT", sourceLabel, "RIGHT", -6, 2)
+  UIDropDownMenu_SetWidth(130, sourceDD)
+  UIDropDownMenu_JustifyText("LEFT", sourceDD)
+  S.sourceDD = sourceDD
+
   -- ===== Note list (left) =====
   local left = CreateFrame("Frame", "FRT_NoteList", leftColumn)
-  left:SetPoint("TOPLEFT",  filterBar, "BOTTOMLEFT", 0, -2)
+  left:SetPoint("TOPLEFT",  sourceBar, "BOTTOMLEFT", 0, -2)  -- moved under Source bar
   left:SetPoint("BOTTOMLEFT", 0, 0)
   left:SetWidth(200)
   left:SetBackdrop({
@@ -200,7 +291,7 @@ function EP.Build(parent)
   -- ===== Marker toolbar (aligned to content) =====
   local toolbar = CreateFrame("Frame", "FRT_NoteEditor_Toolbar", form)
   toolbar:SetPoint("TOPLEFT", titleLabel, "BOTTOMLEFT", 95, -8)
-  toolbar:SetPoint("RIGHT",   form,          "RIGHT",      0,  0)  
+  toolbar:SetPoint("RIGHT",   form,          "RIGHT",      0,  0)
   toolbar:SetHeight(22)
 
   local ICON_COORDS = {
@@ -296,17 +387,17 @@ function EP.Build(parent)
         local hex = D and D.ClassColorsHex and D.ClassColorsHex[classKey]
         local rgb = D and D.HexToRGB and D.HexToRGB(hex)
         b:SetScript("OnEnter", function()
-            GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
-            GameTooltip:ClearLines()
-            if rgb then
+          GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+          GameTooltip:ClearLines()
+          if rgb then
             GameTooltip:AddLine(classKey, rgb[1], rgb[2], rgb[3])
-            else
+          else
             GameTooltip:AddLine(classKey, 1, 1, 1)
-            end
-            GameTooltip:Show()
+          end
+          GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        end
+      end
 
       b:SetScript("OnClick", function()
         if not S.editorEnabled then return end
@@ -377,15 +468,15 @@ function EP.Build(parent)
 
   -- Wire buttons
   btnNew:SetScript("OnClick", function()
-    if EP.IsDirty() then
+    if EP.IsDirty and EP.IsDirty() then
       S.pending.noteSwitch = nil
       S.pending.noteIsNew  = true
-      EP.ShowBlocker()
+      if EP.ShowBlocker then EP.ShowBlocker() end
       StaticPopup_Show("FRT_UNSAVED_SWITCHNOTE")
       return
     end
     if S.currentBossFilter == "All" then
-      -- inline boss picker (unchanged from original flow)
+      -- inline boss picker
       local bossPicker, bossPickDD, bossPickValue
       local function ShowBossPicker()
         if not bossPicker then
@@ -496,6 +587,7 @@ function EP.Build(parent)
   -- ===== Initial state =====
   EP.RebuildRaidDropdown()
   EP.RebuildBossFilterDropdown()
+  EP.RebuildSourceDropdown()
   EP.UpdateButtonsState()
 
   -- Build initial list/editor
@@ -511,7 +603,7 @@ function EP.Build(parent)
       StaticPopup_Hide("FRT_CONFIRM_DELETE_NOTE")
     end)
   else
-    local filtered = EP.GetFilteredNotes()
+    local filtered = EP.GetFilteredNotes and EP.GetFilteredNotes() or {}
     if table.getn(filtered) > 0 then
       S.currentId = filtered[1].id; S.uiSV.selectedId = S.currentId
       EP.LoadSelected(S.currentId)

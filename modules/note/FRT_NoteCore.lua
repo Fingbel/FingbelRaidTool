@@ -15,7 +15,7 @@ local function EnsureSaved()
 
   FRT_Saved.ui = FRT_Saved.ui or {}
   FRT_Saved.ui.mainEditor = FRT_Saved.ui.mainEditor or { x=nil, y=nil, w=800, h=500, selected=nil }
-  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {} }
+  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {}, sourceFilter = "All" }
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
   FRT_Saved.ui.viewer = FRT_Saved.ui.viewer or { autoOpen = true, locked = false }
 end
@@ -27,21 +27,15 @@ local function Hash16(s)
   for i = 1, string.len(s) do sum = math.mod(sum + string.byte(s, i), 65536) end
   local t = "0123456789ABCDEF"
   local hi = math.mod(math.floor(sum / 256), 256); local lo = math.mod(sum, 256)
-  local function hx(v) local a = math.floor(v/16); local b = math.mod(v,16); return string.sub(t,a+1,a+1)..string.sub(t,b+1,b+1) end
+  local function hx(v) local a = math.floor(v/16); local b = math.mod(v,16); return string.sub(t,a+1,a+1) .. string.sub(t,b+1,b+1) end
   return hx(hi)..hx(lo)
-end
-
--- ===== edit gating (stub; always true for now) =====
-local function CanEdit()
-  -- TODO: later: return FRT.IsLeaderOrOfficer and FRT.IsLeaderOrOfficer()
-  return true
 end
 
 -- ===== auto channel =====
 local function AutoShareChannel()
-  if (GetNumRaidMembers() or 0) > 0 then
+  if (GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) then
     return "RAID"
-  elseif (GetNumPartyMembers() or 0) > 0 then
+  elseif (GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) then
     return "PARTY"
   elseif IsInGuild and IsInGuild() then
     return "GUILD"
@@ -49,60 +43,65 @@ local function AutoShareChannel()
   return nil
 end
 
+-- ===== origin helpers =====
+local function _me() return (UnitName and UnitName("player")) or "" end
+
+local function _isGuildmate(name)
+  if not (IsInGuild and IsInGuild()) then return false end
+  local nn = string.lower(tostring(name or ""))
+  for i = 1, (GetNumGuildMembers and GetNumGuildMembers(true) or 0) do
+    local n = GetGuildRosterInfo(i)
+    if n and string.lower(n) == nn then return true end
+  end
+  return false
+end
+
+local function _classifyOrigin(sender, inChan)
+  local me = _me()
+  if sender and string.lower(sender) == string.lower(me) then return "self" end
+  if inChan == "GUILD" or _isGuildmate(sender) then return "guild" end
+  return "outside"
+end
+
+-- Cache REF origins (REF may arrive via GUILD/RAID; NOTE follows over WHISPER)
+local _refOriginById = {}  -- key: note id -> "self"/"guild"/"outside"
+
 -- ===== NoteNet wiring =====
 local function WireNoteNetCallback()
   if FRT and FRT.NoteNet and not Note.__wiredNoteNet then
 
-    local function IsGroupChannel(ch)
-      return ch == "RAID" or ch == "PARTY" or ch == "GUILD" or ch == "BATTLEGROUND"
-    end
+    -- REF/REQ/NOTE/LIBADD (broadcast path)
+    FRT.NoteNet.onRef = function(sender, meta, inChan)
+      -- Cache origin for this id (used when NOTE arrives via WHISPER)
+      _refOriginById[meta.id or ""] = _classifyOrigin(sender, inChan)
 
-    local function AutoGroupChannel()
-      if (GetNumRaidMembers and (GetNumRaidMembers() or 0) > 0) then
-        if (GetBattlefieldStatus and GetBattlefieldStatus(1) == "active") or (UnitInBattleground and UnitInBattleground("player")) then
-          return "BATTLEGROUND"
-        end
-        return "RAID"
-      end
-      if (GetNumPartyMembers and (GetNumPartyMembers() or 0) > 0) then return "PARTY" end
-      if IsInGuild and IsInGuild() then return "GUILD" end
-      return nil
-    end
-
-    -- REF/REQ/NOTE (broadcast-by-reference path)
-    FRT.NoteNet.onRef = function(sender, meta, ch)
       -- Look up note by id in our shared library
       local found
       if FRT.SharedLib and FRT.SharedLib.FindById then
-        local note = FRT.SharedLib.FindById(meta.id)
+        local note = FRT.SharedLib.FindById(meta.id)  -- 1st return is note
         if note then found = note end
       end
 
-      -- Normalize both hashes before comparing
       local function up(s) return string.upper(tostring(s or "")) end
       if found and up(found.hash) == up(meta.hash) then
-        -- Same content: render from local library
         FRT_Saved.note = found.text or ""
         if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
         if FRT_Saved.ui.viewer.autoOpen and FRT.Note and FRT.Note.ShowViewer then FRT.Note.ShowViewer() end
       else
-        -- Different or missing: show a placeholder and request body from sender (group channel only)
-        FRT_Saved.note = string.format("[FRT] Fetching “%s”…",
-          (meta.title and meta.title ~= "" and meta.title) or (meta.id or "?"))
+        FRT_Saved.note = string.format("[FRT] Fetching “%s”…", (meta.title and meta.title ~= "" and meta.title) or (meta.id or "?"))
         if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
-
-        local replyCh = IsGroupChannel(ch) and ch or AutoGroupChannel()
-        if replyCh and FRT.NoteNet and FRT.NoteNet.Send then
-          -- Compose a typed REQ without using WHISPER:
-          -- matches NoteNet's parser: "FRTN|REQ|id|wantVer"
-          local payload = "FRTN|REQ|"..tostring(meta.id or "").."|"..tostring(meta.version or 0)
-          FRT.NoteNet.Send(payload, replyCh)
+        if FRT.NoteNet and FRT.NoteNet.SendReq then
+          -- whisper request back to sender
+          FRT.NoteNet.SendReq(meta.id, meta.version, sender)
         end
       end
     end
 
-    FRT.NoteNet.onNote = function(sender, meta, text, ch)
-      -- Direct body in response to REQ; store into shared library and into scratch.
+    FRT.NoteNet.onNote = function(sender, meta, text, inChan)
+      meta.owner  = sender
+      meta.source = "shared"
+      meta.origin = _refOriginById[meta.id or ""] or _classifyOrigin(sender, inChan)
+
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, text or "")
       end
@@ -111,16 +110,19 @@ local function WireNoteNetCallback()
       if FRT_Saved.ui.viewer.autoOpen and Note.ShowViewer then Note.ShowViewer(Note) end
     end
 
-    -- Library replication on save (LIBADD)
-    FRT.NoteNet.onLibAdd = function(sender, meta, body, ch)
+    FRT.NoteNet.onLibAdd = function(sender, meta, body, inChan)
+      meta.owner  = sender
+      meta.source = "shared"
+      meta.origin = _classifyOrigin(sender, inChan)
+
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, body or "")
       end
+
       FRT_Saved.note = tostring(body or "")
       if Note.UpdateViewerText then Note.UpdateViewerText(Note) end
       if FRT_Saved.ui.viewer.autoOpen and Note.ShowViewer then Note.ShowViewer(Note) end
 
-      -- Ask editor pane (if open) to refresh its list/buttons
       if FRT.Note and FRT.Note.EditorPane and FRT.Note.EditorPane.RebuildList then
         FRT.Note.EditorPane.RebuildList()
       end
@@ -129,34 +131,25 @@ local function WireNoteNetCallback()
       end
     end
 
-    -- Respond to REQ with our library content, using the same (or best) group channel
-    FRT.NoteNet.onReq = function(requester, meta, ch)
+    FRT.NoteNet.onReq = function(requester, meta, inChan)
       local wanted = meta and meta.id
       if not wanted or wanted == "" then return end
-
       local arr = FRT_Saved.notes or {}
       local src
-      for i = 1, table.getn(arr) do
-        local n = arr[i]; if n and n.id == wanted then src = n; break end
-      end
+      for i = 1, table.getn(arr) do local n = arr[i]; if n and n.id == wanted then src = n; break end end
       if not src then return end
-
       local hash = src.hash or Hash16(src.text or "")
       local ver  = src.version or 1
-
       if FRT.NoteNet.SendNote then
-        local sendCh = IsGroupChannel(ch) and ch or AutoGroupChannel()
-        if sendCh then
-          FRT.NoteNet.SendNote({
-            id = src.id, version = ver, hash = hash,
-            title = src.title or "", raid = src.raid or "", boss = src.boss or ""
-          }, src.text or "", sendCh, nil) -- no whisper fallback
-        end
+        FRT.NoteNet.SendNote({
+          id = src.id, version = ver, hash = hash,
+          title = src.title or "", raid = src.raid or "", boss = src.boss or ""
+        }, src.text or "", "WHISPER", requester)
       end
     end
 
     Note.__wiredNoteNet = true
-    if FRT and FRT.safePrint then FRT.safePrint("NoteNet wired (group channels only; no WHISPER)") end
+    if FRT and FRT.safePrint then FRT.safePrint("NoteNet wired (Shared Library + REF/REQ/NOTE + origin tagging)") end
   end
 end
 
@@ -200,22 +193,22 @@ local function DoBroadcastRefById(id, channel)
     id = n.id, version = n.version or 1, hash = n.hash or Hash16(n.text or ""),
     title = n.title or "", raid = n.raid or "", boss = n.boss or ""
   }
-  local ch = channel or (IsInGuild and IsInGuild() and "GUILD") or AutoShareChannel()
+  local ch = channel or AutoShareChannel()
   if not ch then if FRT.Print then FRT.Print("No channel.") end return true end
   if FRT.NoteNet and FRT.NoteNet.SendRef then
     FRT.NoteNet.SendRef(meta, ch)
     FRT_Saved.note = n.text or ""   -- show what we just referenced
-    Note.UpdateViewerText(Note)
+    if Note.UpdateViewerText then Note.UpdateViewerText(Note) end
     if FRT.Print then FRT.Print("Broadcasted REF: "..(meta.title ~= "" and meta.title or "(untitled)")) end
   end
   return true
 end
 
 function Note.OnSlash(_, cmd, rest)
-  if cmd == "ref" and rest and rest ~= "" then      return DoBroadcastRefById(rest, nil)
-  elseif cmd == "view" then                         Note.ShowViewer(Note); return true
-  elseif cmd == "editor" then                       Note.ShowEditor(Note); return true
-  elseif cmd == "clear" then                        FRT_Saved.note = ""; Note.UpdateViewerText(Note); return true
+  if cmd == "ref"   and rest and rest ~= "" then return DoBroadcastRefById(rest, nil)
+  elseif cmd == "view"   then if Note.ShowViewer then Note.ShowViewer(Note) end; return true
+  elseif cmd == "editor" then if Note.ShowEditor then Note.ShowEditor(Note) end; return true
+  elseif cmd == "clear"  then FRT_Saved.note = ""; if Note.UpdateViewerText then Note.UpdateViewerText(Note) end; return true
   end
   return false
 end
