@@ -5,13 +5,13 @@ FRT.Utils = FRT.Utils or {}
 function FRT.Utils.CreateRichTextViewer(parent, opts)
   opts = opts or {}
   local DEFAULT_FONT = opts.fontObject or "GameFontNormal"
-  local RIGHT_COL_W  = opts.rightColumnWidth or 18
+  local RIGHT_COL_W  = opts.rightColumnWidth or 16   -- fallback if scrollbar width can't be measured
   local INSET_L      = (opts.insets and opts.insets.left)   or 4
   local INSET_R      = (opts.insets and opts.insets.right)  or 4
   local INSET_T      = (opts.insets and opts.insets.top)    or 4
   local INSET_B      = (opts.insets and opts.insets.bottom) or 4
   local SAFE_PAD     = (opts.safePad ~= nil) and opts.safePad or 1
-  local ICON_SCALE  = (opts.iconScale ~= nil) and opts.iconScale or 0.85  -- 85% of line height
+  local ICON_SCALE   = (opts.iconScale ~= nil) and opts.iconScale or 0.85  -- 85% of line height
 
   local function snapi(v) return math.floor((v or 0) + 0.5) end
 
@@ -26,7 +26,22 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
   -- ScrollFrame
   local scroll = CreateFrame("ScrollFrame", sfName, root, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 0, 0)
-  scroll:SetPoint("BOTTOMRIGHT", -RIGHT_COL_W, 0)
+
+  -- Measure the actual scrollbar width and anchor using it
+  local function measureSBW()
+    local sb = getglobal(sfName.."ScrollBar")
+    local w = (sb and sb.GetWidth and sb:GetWidth()) or RIGHT_COL_W
+    return math.max(14, math.floor((w or RIGHT_COL_W) + 0.5))
+  end
+  local SB_W = measureSBW()
+
+  local function reanchorToSB()
+    SB_W = measureSBW()
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", 0, 0)
+    scroll:SetPoint("BOTTOMRIGHT", -SB_W , 0)
+  end
+  reanchorToSB()
 
   -- 1.12 shim
   if not scroll.UpdateScrollChildRect then
@@ -171,16 +186,12 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
         newLine(DEFAULT_FONT)
 
       elseif kind == "icon" then
-        -- determine current line reference height (use ongoing lineH or default font)
         local lineRefH = (lineH > 0) and lineH or baselineH(DEFAULT_FONT)
-
-        -- target size: use provided token size if given; otherwise derive from line height
         local w = tonumber(tk.w)
         local h = tonumber(tk.h)
         if not h or h <= 0 then h = math.floor(lineRefH * ICON_SCALE + 0.5) end
         if not w or w <= 0 then w = h end
 
-        -- wrap if needed (respect right pad)
         if x + w > INSET_L + contentW - SAFE_PAD and x > INSET_L then
           newLine(DEFAULT_FONT)
           lineRefH = (lineH > 0) and lineH or baselineH(DEFAULT_FONT)
@@ -188,7 +199,6 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
           if not tk.w then w = h end
         end
 
-        -- vertical centering within the line box
         local vOff = math.floor(((lineRefH - h) / 2) + 0.5)
 
         local t = acquireTX()
@@ -231,12 +241,10 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
           local maxW  = (INSET_L + contentW) - snapi(x) - SAFE_PAD
 
           if candW > maxW and run ~= "" then
-            -- wrap BEFORE this piece (never split)
             flushRun()
             newLine(fontObj)
             maxW = contentW - SAFE_PAD
 
-            -- Long word that doesn't fit even on empty line? Place as-is (overflow) and continue on next line
             local pieceW = widthOf(fontObj, piece)
             if pieceW > maxW and (pairs[j].word or "") ~= "" and (pairs[j].spaces or "") == "" then
               run = piece; runW = pieceW
@@ -267,14 +275,17 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
 
   -- Top-level render that adapts to actual scrollbar visibility
   local function renderTokens(tokens)
+    -- keep anchors in sync with real scrollbar width
+    reanchorToSB()
+
     local assumeScroll = isScrollShown()
     local viewW = root:GetWidth() or 0
-    local contentW = viewW - (assumeScroll and RIGHT_COL_W or 0) - INSET_L - INSET_R
+    local contentW = viewW - (assumeScroll and SB_W or 0) - INSET_L - INSET_R
     renderWithContentW(tokens, contentW)
 
     local nowScroll = isScrollShown()
     if nowScroll ~= assumeScroll then
-      local contentW2 = viewW - (nowScroll and RIGHT_COL_W or 0) - INSET_L - INSET_R
+      local contentW2 = viewW - (nowScroll and SB_W or 0) - INSET_L - INSET_R
       renderWithContentW(tokens, contentW2)
     end
   end
@@ -313,8 +324,8 @@ function FRT.Utils.CreateRichTextViewer(parent, opts)
     sb:SetValue((sb:GetValue() or 0) - delta * 20)
   end)
 
-  root:SetScript("OnSizeChanged", Refresh)
-  root:SetScript("OnShow", Refresh)
+  root:SetScript("OnSizeChanged", function() reanchorToSB(); Refresh() end)
+  root:SetScript("OnShow", function() reanchorToSB(); Refresh() end)
 
   return {
     root      = root,
