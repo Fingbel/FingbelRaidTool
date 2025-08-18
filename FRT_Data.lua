@@ -51,8 +51,9 @@ D.RoleColorsHex = {
   MELEE  = "F59E0B",  -- orange
   RANGED = "8B5CF6",  -- purple
 }
-
--- Common role synonyms -> canonical keys above
+--===============================
+-- Common role synonyms to canonical keys
+--===============================
 D.RoleSynonyms = {
   MT="TANK", OT="TANK", T="TANK",
   HEAL="HEALER", HEALERS="HEALER", H="HEALER",
@@ -60,9 +61,31 @@ D.RoleSynonyms = {
   MDPS="MELEE", MELEE="MELEE", M="MELEE",
   RDPS="RANGED", RANGED="RANGED", R="RANGED",
 }
-
 -- Unknown/custom placeholders use gold so authors see they were recognized.
 D.PlaceholderNeutralHex = "FFD100"
+
+--===============================
+-- Canonical section keys 
+--===============================
+D.Sections = {
+  HEALER = { label = "Healer" },
+  TANK   = { label = "Tank"   },
+  RDPS   = { label = "Ranged DPS" },
+  MDPS   = { label = "Melee DPS"  },
+}
+
+-- Human-friendly aliases accepted in [Section=...] (case-insensitive)
+D.SectionAliases = {
+  HEALER="HEALER", HEALERS="HEALER", HEAL="HEALER",
+  TANK="TANK", TANKS="TANK", MT="TANK", OT="TANK",
+  RDPS="RDPS", RANGED="RDPS", RANGEDDPS="RDPS",
+  MDPS="MDPS", MELEE="MDPS", MELEEDPS="MDPS",
+}
+
+--Colors for section chips/headers in the viewer
+D.SectionColorsHex = {
+  HEALER="4CD964", TANK="C79C6E", RDPS="69CCF0", MDPS="F1C40F",
+}
 
 -- Simple helper (Parser reuses it)
 function D.HexToRGB(hex)
@@ -78,13 +101,7 @@ end
 --===============================
 D.ClassOrder = { WARRIOR=1, PRIEST=2, DRUID=3, MAGE=4, ROGUE=5, HUNTER=6, WARLOCK=7, PALADIN=8, SHAMAN=9 }
 
---===============================
--- Buff metadata (pure data)
--- Each buff can specify:
---   label, providers, texSubstrings, headerIcon,
---   need = "always" | "mana" | "melee" | "physical" | "tank" | "dps" | "situational"
---   spellIcons = { single = {...}, group = {...} } for locale-proof casting.
---===============================
+
 D.Buffs = {
   --========================
   -- PRIEST
@@ -148,19 +165,6 @@ D.Buffs = {
   },
   },
 
-  -- thorns = {
-  --   key="thorns",
-  --   label="Thorns",
-  --   providers = { DRUID=true },
-  --   texSubstrings = { "Spell_Nature_Thorns" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_Thorns",
-  --   need = "tank",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_Thorns" },
-  --     group  = {},
-  --   },
-  -- },
-
   --========================
   -- MAGE
   --========================
@@ -176,245 +180,6 @@ D.Buffs = {
       group  = { "Spell_Holy_ArcaneBrilliance" },
     },
   },
-
-  -- amplify = {
-  --   key="amplify",
-  --   label="Amplify Magic",
-  --   providers = { MAGE=true },
-  --   texSubstrings = { "Spell_Holy_FlashHeal" },
-  --   headerIcon = "Interface\\Icons\\Spell_Holy_FlashHeal",
-  --   need = "situational",
-  --   spellIcons = {
-  --     single = { "Spell_Holy_FlashHeal" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- dampen = {
-  --   key="dampen",
-  --   label="Dampen Magic",
-  --   providers = { MAGE=true },
-  --   texSubstrings = { "Spell_Nature_AbolishMagic", "Spell_Nature_AstralRecalGroup" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_AbolishMagic",
-  --   need = "situational",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_AbolishMagic", "Spell_Nature_AstralRecalGroup" },
-  --     group  = {},
-  --   },
-  -- },
-
-  --========================
-  -- PALADIN
-  --========================
-  bok = {
-    key="bok",
-    label="Blessing of Kings",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Magic_MageArmor", "Spell_Magic_GreaterBlessingofKings" },
-    headerIcon = "Interface\\Icons\\Spell_Magic_MageArmor",
-    need = "always",
-    spellIcons = {
-      single = { "Spell_Magic_MageArmor" },
-      group  = { "Spell_Magic_GreaterBlessingofKings" },
-    },
-  },
-
-  bom = {
-    key="bom",
-    label="Blessing of Might",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofMight" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_FistOfJustice",
-    need = "melee",
-    spellIcons = {
-      single = { "Spell_Holy_FistOfJustice" },
-      group  = { "Spell_Holy_GreaterBlessingofMight" },
-    },
-  },
-
-  bow = {
-    key="bow",
-    label="Blessing of Wisdom",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Holy_SealOfWisdom", "Spell_Holy_GreaterBlessingofWisdom" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_SealOfWisdom",
-    need = "mana",
-    spellIcons = {
-      single = { "Spell_Holy_SealOfWisdom" },
-      group  = { "Spell_Holy_GreaterBlessingofWisdom" },
-    },
-  },
-
-  bos = {
-    key="bos",
-    label="Blessing of Salvation",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Holy_SealOfSalvation", "Spell_Holy_GreaterBlessingofSalvation" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_SealOfSalvation",
-    need = "dps",
-    spellIcons = {
-      single = { "Spell_Holy_SealOfSalvation" },
-      group  = { "Spell_Holy_GreaterBlessingofSalvation" },
-    },
-  },
-
-  bol = {
-    key="bol",
-    label="Blessing of Light",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Holy_PrayerOfHealing", "Spell_Holy_GreaterBlessingOfLight" },
-    headerIcon = "Interface\\Icons\\Spell_Holy_PrayerOfHealing",
-    need = "tank",
-    spellIcons = {
-      single = { "Spell_Holy_PrayerOfHealing" },
-      group  = { "Spell_Holy_GreaterBlessingOfLight" },
-    },
-  },
-
-  bosanc = {
-    key="bosanc",
-    label="Blessing of Sanctuary",
-    providers = { PALADIN=true },
-    texSubstrings = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary" },
-    headerIcon = "Interface\\Icons\\Spell_Nature_LightningShield",
-    need = "tank",
-    spellIcons = {
-      single = { "Spell_Nature_LightningShield" },
-      group  = { "Spell_Holy_GreaterBlessingofSanctuary" },
-    },
-  },
-
-  --========================
-  -- SHAMAN 
-  --========================
-
-  --No totem tracking for now
-
-  -- soe = {
-  --   key="soe",
-  --   label="Strength of Earth",
-  --   providers = { SHAMAN=true },
-  --   texSubstrings = { "Spell_Nature_StrengthOfEarthTotem02" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_StrengthOfEarthTotem02",
-  --   need = "melee",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_StrengthOfEarthTotem02" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- goa = {
-  --   key="goa",
-  --   label="Grace of Air",
-  --   providers = { SHAMAN=true },
-  --   texSubstrings = { "Spell_Nature_InvisibilityTotem" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_InvisibilityTotem",
-  --   need = "melee",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_InvisibilityTotem" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- wf = {
-  --   key="wf",
-  --   label="Windfury",
-  --   providers = { SHAMAN=true },
-  --   texSubstrings = { "Spell_Nature_Windfury" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_Windfury",
-  --   need = "melee",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_Windfury" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- ms = {
-  --   key="ms",
-  --   label="Mana Spring",
-  --   providers = { SHAMAN=true },
-  --   texSubstrings = { "Spell_Nature_ManaRegenTotem" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_ManaRegenTotem",
-  --   need = "mana",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_ManaRegenTotem" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- ta = {
-  --   key="ta",
-  --   label="Tranquil Air",
-  --   providers = { SHAMAN=true },
-  --   texSubstrings = { "Spell_Nature_Brilliance" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_Brilliance",
-  --   need = "dps",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_Brilliance" },
-  --     group  = {},
-  --   },
-  -- },
-
-  --========================
-  -- WARLOCK
-  --========================
-  -- bloodpact = {
-  --   key="bloodpact",
-  --   label="Blood Pact",
-  --   providers = { WARLOCK=true },
-  --   texSubstrings = { "Spell_Shadow_BloodBoil" },
-  --   headerIcon = "Interface\\Icons\\Spell_Shadow_BloodBoil",
-  --   need = "always",
-  --   spellIcons = {
-  --     single = { "Spell_Shadow_BloodBoil" },
-  --     group  = {},
-  --   },
-  -- },
-
-  --========================
-  -- HUNTER
-  --========================
-  -- tsa = {
-  --   key="tsa",
-  --   label="Trueshot Aura",
-  --   providers = { HUNTER=true },
-  --   texSubstrings = { "Ability_TrueShot", "Ability_TrueShotAura" },
-  --   headerIcon = "Interface\\Icons\\Ability_TrueShot",
-  --   need = "physical",
-  --   spellIcons = {
-  --     single = { "Ability_TrueShot", "Ability_TrueShotAura" },
-  --     group  = {},
-  --   },
-  -- },
-
-  -- aotw = {
-  --   key="aotw",
-  --   label="Aspect of the Wild",
-  --   providers = { HUNTER=true },
-  --   texSubstrings = { "Spell_Nature_ProtectionformNature", "Spell_Nature_ResistNature" },
-  --   headerIcon = "Interface\\Icons\\Spell_Nature_ProtectionformNature",
-  --   need = "situational",
-  --   spellIcons = {
-  --     single = { "Spell_Nature_ProtectionformNature", "Spell_Nature_ResistNature" },
-  --     group  = {},
-  --   },
-  -- },
-
-  --========================
-  -- WARRIOR
-  --========================
-  -- bshout = {
-  --   key="bshout",
-  --   label="Battle Shout",
-  --   providers = { WARRIOR=true },
-  --   texSubstrings = { "Ability_Warrior_BattleShout" },
-  --   headerIcon = "Interface\\Icons\\Ability_Warrior_BattleShout",
-  --   need = "physical",
-  --   spellIcons = {
-  --     single = { "Ability_Warrior_BattleShout" },
-  --     group  = {},
-  --   },
-  -- },
 }
 
 -- Preferred column order (left -> right)

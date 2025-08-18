@@ -1,5 +1,5 @@
 -- Fingbel Raid Tool - Parser
--- FRT_NoteParser.lua
+-- FRT_NoteParser.lua --
 
 FRT = FRT or {}
 FRT.Note = FRT.Note or {}
@@ -15,30 +15,21 @@ do
   local CLASS_TEXCOORD   = D.ClassIcons and D.ClassIcons.COORDS     or {}
   local CLASS_HEX        = D.ClassColorsHex or {}
   local ROLE_HEX         = D.RoleColorsHex or {}
-  local ROLE_SYNONYMS    = D.RoleSynonyms or {}
-  local NEUTRAL_HEX      = D.PlaceholderNeutralHex or "FFD100" -- gold
+  local PH_NEUTRAL_HEX   = D.PlaceholderNeutralHex or "FFD100"
+
+  local SECTIONS         = D.Sections or {}
+  local SECTION_ALIASES  = D.SectionAliases or {}
+  local SECTION_COLORS   = D.SectionColorsHex or {}
 
   local function hex2rgb(hex)
     return (D.HexToRGB and D.HexToRGB(hex)) or {1,1,1}
   end
-
-  local function colorForPlaceholder(key)
-    local up = string.upper(tostring(key or ""))
-    -- class placeholder (e.g., {MAGE1})
-    if CLASS_HEX[up] then
-      return hex2rgb(CLASS_HEX[up])
-    end
-    -- role placeholder (e.g., {TANK1}, {MT1}, {HEALER})
-    local norm = ROLE_SYNONYMS[up] or up
-    if ROLE_HEX[norm] then
-      return hex2rgb(ROLE_HEX[norm])
-    end
-    -- unknown/free-form placeholder -> gold
-    return hex2rgb(NEUTRAL_HEX)
-  end
-
-  local function isRoleToken(up)
-    return ROLE_HEX[up] ~= nil or ROLE_SYNONYMS[up] ~= nil
+  local function trim(s)    return (string.gsub(tostring(s or ""), "^%s*(.-)%s*$", "%1")) end
+  local function upper(s)   return string.upper(tostring(s or "")) end
+  local function titleCase(s)
+    s = tostring(s or "")
+    s = string.lower(s)
+    return (string.gsub(s, "^%l", string.upper))
   end
 
   local function pushText(tokens, text, color, font)
@@ -68,18 +59,69 @@ do
     table.insert(tokens, { kind="linebreak" })
   end
 
-  -- Parse supports:
-  --  \n
-  --  {rt1}..{rt8}
-  --  [color=#RRGGBB] ... [/color]
-  --  {ClassName}                       -> class icon
-  --  [ClassName] ... [/ClassName]      -> class color span
-  --  {NAME#} / {ROLE#} / {ROLE}        -> placeholder (colored text, braces stripped)
+  local function ensureLineBreak(tokens)
+    local n = table.getn(tokens)
+    if n == 0 then return end
+    local last = tokens[n]
+    if last and last.kind ~= "linebreak" then pushLine(tokens) end
+  end
+
+  local function colorForPlaceholder(baseUP)
+    if CLASS_HEX[baseUP] then
+      return hex2rgb(CLASS_HEX[baseUP])
+    end
+    local rh = ROLE_HEX[baseUP]
+    if rh then return hex2rgb(rh) end
+    return hex2rgb(PH_NEUTRAL_HEX)
+  end
+
+  local function sectionColor(keyUP)
+    if CLASS_HEX[keyUP] then
+      return hex2rgb(CLASS_HEX[keyUP])
+    end
+    if SECTION_COLORS[keyUP] then
+      return hex2rgb(SECTION_COLORS[keyUP])
+    end
+    if ROLE_HEX[keyUP] then
+      return hex2rgb(ROLE_HEX[keyUP])
+    end
+    return hex2rgb(PH_NEUTRAL_HEX)
+  end
+
+  local function sectionLabel(keyUP)
+    if SECTIONS[keyUP] and SECTIONS[keyUP].label then
+      return SECTIONS[keyUP].label
+    end
+    if CLASS_HEX[keyUP] then
+      return titleCase(keyUP)
+    end
+    return keyUP
+  end
+
+  local function pushSectionSeparator(tokens, keyUP, curFont)
+    local label   = sectionLabel(keyUP)
+    local color   = sectionColor(keyUP)
+    local before  = string.rep("-", 13)
+    local after   = string.rep("-", 13)
+    local line    = before .. label .. after
+
+    ensureLineBreak(tokens)
+    pushText(tokens, line, color, curFont)
+    pushLine(tokens)
+  end
+
+  -- Parse:
+  -- \n
+  -- {rt1}..{rt8}
+  -- {ClassName} -> class icon
+  -- {PLACEHOLDER} -> colored text (no braces)
+  -- [color=#RRGGBB]...[/color]
+  -- [ClassName]...[/ClassName] -> class-colored span
+  -- [Section=Healer/Tank/RDPS/MDPS] or [Section=ClassName] -> dashed separator line
   function Parser.Parse(text)
     local tokens = {}
     if type(text) ~= "string" or text == "" then return tokens end
 
-    -- normalize newlines
     text = string.gsub(text, "\r\n", "\n")
     text = string.gsub(text, "\r", "\n")
 
@@ -95,92 +137,97 @@ do
     while i <= n do
       local ch = string.sub(text, i, i)
 
-      -- newline
       if ch == "\n" then
         flushBuf(); pushLine(tokens); i = i + 1
 
-      -- braces: {rtN} / placeholders / {Class}
       elseif ch == "{" then
-        -- {rtN}
         local a,b,num = string.find(text, "^%{rt([1-8])%}", i)
         if a then
           flushBuf(); pushIcon(tokens, RT_TEXTURE, RT_TEXCOORD[tonumber(num)], 14, 14); i = b + 1
         else
-          -- Placeholder with digits: {NAME123}
-          local ap, bp, pname, pnum = string.find(text, "^%{([%a]+)([0-9]+)%}", i)
-          if ap then
-            flushBuf()
-            local color = colorForPlaceholder(pname)
-            -- Display WITHOUT braces in preview
-            pushText(tokens, (pname or "") .. (pnum or ""), color, curFont)
-            i = bp + 1
-          else
-            -- Pure alpha token: could be role placeholder OR class icon OR unknown placeholder
-            local ac, bc, cname = string.find(text, "^%{([%a]+)%}", i)
-            if ac then
-              local up = string.upper(cname or "")
-              if isRoleToken(up) then
-                flushBuf()
-                local color = colorForPlaceholder(up)
-                -- role-only placeholder, no braces
-                pushText(tokens, cname, color, curFont)
-                i = bc + 1
-              elseif CLASS_TEXCOORD[up] then
-                -- class icon (e.g., {MAGE})
-                flushBuf(); pushIcon(tokens, CLASS_TEX, CLASS_TEXCOORD[up], 14, 14); i = bc + 1
-              else
-                -- unknown/free-form placeholder -> gold, no braces
-                flushBuf()
-                pushText(tokens, cname, colorForPlaceholder(up), curFont)
-                i = bc + 1
-              end
+          local ac, bc, cname = string.find(text, "^%{([%a]+)%}", i)
+          if ac then
+            local up = upper(cname or "")
+            if CLASS_TEXCOORD[up] then
+              flushBuf(); pushIcon(tokens, CLASS_TEX, CLASS_TEXCOORD[up], 14, 14); i = bc + 1
             else
-              -- not a token we recognize -> treat '{' literally
+              local phA, phB, raw = string.find(text, "^%{([%w_]+)%}", i)
+              if phA then
+                local label = raw
+                local baseUP = upper(string.match(upper(label), "^([A-Z_]+)") or label)
+                flushBuf(); pushText(tokens, label, colorForPlaceholder(baseUP), curFont)
+                i = phB + 1
+              else
+                buf = buf .. "{"; i = i + 1
+              end
+            end
+          else
+            local ap, bp, raw = string.find(text, "^%{([%w_]+)%}", i)
+            if ap then
+              local label = raw
+              local baseUP = upper(string.match(upper(label), "^([A-Z_]+)") or label)
+              flushBuf(); pushText(tokens, label, colorForPlaceholder(baseUP), curFont)
+              i = bp + 1
+            else
               buf = buf .. "{"; i = i + 1
             end
           end
         end
 
-      -- brackets: [color=#RRGGBB], [/color], [Class], [/Class]
       elseif ch == "[" then
-        -- [color=#RRGGBB]
-        local a,b,hex = string.find(text, "^%[color=#([0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])%]", i)
-        if a then
-          flushBuf(); curColor = hex2rgb(hex) or curColor; i = b + 1
-        else
-          -- [/color]
-          local ac,bc = string.find(text, "^%[/color%]", i)
-          if ac then
-            flushBuf(); curColor = nil; i = bc + 1
+        -- Section separator
+        local sa, sb, sval = string.find(text, "^%[Section%s*=%s*([^%]]+)%]", i)
+        if sa then
+          local key = upper(trim(sval or ""))
+          key = SECTION_ALIASES[key] or key
+          if SECTIONS[key] or CLASS_HEX[key] then
+            flushBuf()
+            pushSectionSeparator(tokens, key, curFont)
+            i = sb + 1
           else
-            -- [ClassName]
-            local ak,bk,cname = string.find(text, "^%[([%a]+)%]", i)
-            if ak then
-              local up = string.upper(cname or "")
-              if CLASS_HEX[up] then
-                flushBuf(); curColor = hex2rgb(CLASS_HEX[up]); i = bk + 1
-              else
-                buf = buf .. "["; i = i + 1
-              end
+            -- Unknown section value -> treat as literal '['
+            buf = buf .. "["; i = i + 1
+          end
+
+        else
+          -- [color=#RRGGBB]
+          local a,b,hex = string.find(text, "^%[color=#([0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])%]", i)
+          if a then
+            flushBuf(); curColor = hex2rgb(hex) or curColor; i = b + 1
+          else
+            -- [/color]
+            local ac,bc = string.find(text, "^%[/color%]", i)
+            if ac then
+              flushBuf(); curColor = nil; i = bc + 1
             else
-              -- [/ClassName]
-              local a2,b2,cend = string.find(text, "^%[/([%a]+)%]", i)
-              if a2 then
-                local up2 = string.upper(cend or "")
-                if CLASS_HEX[up2] then
-                  flushBuf(); curColor = nil; i = b2 + 1
+              -- [ClassName]
+              local ak,bk,cname = string.find(text, "^%[([%a]+)%]", i)
+              if ak then
+                local up = upper(cname or "")
+                if CLASS_HEX[up] then
+                  flushBuf(); curColor = hex2rgb(CLASS_HEX[up]); i = bk + 1
                 else
                   buf = buf .. "["; i = i + 1
                 end
               else
-                buf = buf .. "["; i = i + 1
+                -- [/ClassName]
+                local a2,b2,cend = string.find(text, "^%[/([%a]+)%]", i)
+                if a2 then
+                  local up2 = upper(cend or "")
+                  if CLASS_HEX[up2] then
+                    flushBuf(); curColor = nil; i = b2 + 1
+                  else
+                    buf = buf .. "["; i = i + 1
+                  end
+                else
+                  buf = buf .. "["; i = i + 1
+                end
               end
             end
           end
         end
 
       else
-        -- plain text
         buf = buf .. ch; i = i + 1
       end
     end

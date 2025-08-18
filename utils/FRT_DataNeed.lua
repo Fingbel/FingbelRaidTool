@@ -10,7 +10,6 @@ do
     mana   = function(unit) local pt = UnitPowerType and UnitPowerType(unit) or 0; return (pt == 0) end,
   }
 
-  -- Merge user-provided tokens from FRT.Data.NeedTokens, if any
   local D = FRT.Data or {}
   if D.NeedTokens then
     local k, fn
