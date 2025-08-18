@@ -31,6 +31,7 @@ S.uiSV             = nil
 S.currentRaid      = nil
 S.currentId        = nil
 S.currentBossFilter= "All"
+S.currentScopeFilter = "All"
 
 -- editor state
 S.editorEnabled    = false
@@ -44,6 +45,8 @@ S.pending = {
   noteIsNew   = false,
   deleteId    = nil,
   bossFilter  = nil,
+  sourceFilter = nil,          -- keep for compatibility with existing popups
+  scopeFilter  = nil,          
 }
 
 -- blocker frame (modal)

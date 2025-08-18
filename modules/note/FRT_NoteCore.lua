@@ -15,7 +15,7 @@ local function EnsureSaved()
 
   FRT_Saved.ui = FRT_Saved.ui or {}
   FRT_Saved.ui.mainEditor = FRT_Saved.ui.mainEditor or { x=nil, y=nil, w=800, h=500, selected=nil }
-  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {}, sourceFilter = "All" }
+  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {}, sourceFilter = "All", scopeFilter = "All" }
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
   FRT_Saved.ui.viewer = FRT_Saved.ui.viewer or { autoOpen = true, locked = false }
 end
@@ -63,22 +63,24 @@ local function _classifyOrigin(sender, inChan)
   return "outside"
 end
 
--- Cache REF origins (REF may arrive via GUILD/RAID; NOTE follows over WHISPER)
-local _refOriginById = {}  -- key: note id -> "self"/"guild"/"outside"
+-- NEW: scope from channel/sender (“guild” if guild channel or guildmate; else “external”)
+local function _classifyScope(sender, inChan)
+  if inChan == "GUILD" or _isGuildmate(sender) then return "guild" end
+  return "external"
+end
 
--- ===== NoteNet wiring =====
+-- Cache REF origins (REF may arrive via GUILD/RAID; NOTE follows over WHISPER)
+local _refOriginById = {}
+
 local function WireNoteNetCallback()
   if FRT and FRT.NoteNet and not Note.__wiredNoteNet then
 
-    -- REF/REQ/NOTE/LIBADD (broadcast path)
     FRT.NoteNet.onRef = function(sender, meta, inChan)
-      -- Cache origin for this id (used when NOTE arrives via WHISPER)
       _refOriginById[meta.id or ""] = _classifyOrigin(sender, inChan)
 
-      -- Look up note by id in our shared library
       local found
       if FRT.SharedLib and FRT.SharedLib.FindById then
-        local note = FRT.SharedLib.FindById(meta.id)  -- 1st return is note
+        local note = FRT.SharedLib.FindById(meta.id)
         if note then found = note end
       end
 
@@ -91,7 +93,6 @@ local function WireNoteNetCallback()
         FRT_Saved.note = string.format("[FRT] Fetching “%s”…", (meta.title and meta.title ~= "" and meta.title) or (meta.id or "?"))
         if FRT.Note and FRT.Note.UpdateViewerText then FRT.Note.UpdateViewerText() end
         if FRT.NoteNet and FRT.NoteNet.SendReq then
-          -- whisper request back to sender
           FRT.NoteNet.SendReq(meta.id, meta.version, sender)
         end
       end
@@ -101,6 +102,8 @@ local function WireNoteNetCallback()
       meta.owner  = sender
       meta.source = "shared"
       meta.origin = _refOriginById[meta.id or ""] or _classifyOrigin(sender, inChan)
+      -- NEW: stamp scope on received body
+      meta.scope  = _classifyScope(sender, inChan)
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, text or "")
@@ -114,6 +117,8 @@ local function WireNoteNetCallback()
       meta.owner  = sender
       meta.source = "shared"
       meta.origin = _classifyOrigin(sender, inChan)
+      -- NEW: stamp scope on library replication
+      meta.scope  = _classifyScope(sender, inChan)
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, body or "")
@@ -149,7 +154,7 @@ local function WireNoteNetCallback()
     end
 
     Note.__wiredNoteNet = true
-    if FRT and FRT.safePrint then FRT.safePrint("NoteNet wired (Shared Library + REF/REQ/NOTE + origin tagging)") end
+    if FRT and FRT.safePrint then FRT.safePrint("NoteNet wired (Shared Library + REF/REQ/NOTE + origin+scope tagging)") end
   end
 end
 

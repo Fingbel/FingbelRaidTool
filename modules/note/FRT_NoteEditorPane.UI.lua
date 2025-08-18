@@ -102,7 +102,9 @@ function EP.Build(parent)
   S.currentRaid         = selRaid
   S.currentId           = S.uiSV.selectedId or nil
   S.currentBossFilter   = S.uiSV.selectedBossByRaid[S.currentRaid] or "All"
-  S.currentOriginFilter = S.uiSV.originFilter or "Any"   -- NEW
+  S.currentOriginFilter = S.uiSV.originFilter or "Any" 
+  S.currentScopeFilter = (S.uiSV.scopeFilter or S.uiSV.sourceFilter) or "All"
+  S.currentSourceFilter = (S.uiSV.scopeFilter or S.uiSV.sourceFilter) or "All"
 
   -- ===== Header =====
   local header = CreateFrame("Frame", "FRT_NoteEditor_Header", parent)
@@ -190,7 +192,7 @@ function EP.Build(parent)
   UIDropDownMenu_JustifyText("LEFT", bossFilterDD)
   S.bossDD = bossFilterDD
 
-  -- Source filter bar (below Boss)
+  -- Scope filter bar (below Boss)
   local sourceBar = CreateFrame("Frame", "FRT_SourceFilterBar", filterBar)
   sourceBar:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", 0, -6)
   sourceBar:SetPoint("TOPRIGHT", filterBar, "BOTTOMRIGHT", 0, -6)
@@ -198,7 +200,7 @@ function EP.Build(parent)
 
   local sourceLabel = sourceBar:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   sourceLabel:SetPoint("LEFT", 0, 0)
-  sourceLabel:SetText("Source:")
+  sourceLabel:SetText("Scope:")  -- was "Source:"
 
   local sourceDD = CreateFrame("Frame", "FRT_NoteFilter_SourceDropDown", sourceBar, "UIDropDownMenuTemplate")
   sourceDD:SetPoint("LEFT", sourceLabel, "RIGHT", -6, 2)

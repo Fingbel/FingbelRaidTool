@@ -12,9 +12,16 @@ function EP.EnsureSaved()
   if type(FRT_Saved) ~= "table" then FRT_Saved = {} end
   FRT_Saved.notes = FRT_Saved.notes or {}
   FRT_Saved.ui    = FRT_Saved.ui or {}
-  FRT_Saved.ui.notes = FRT_Saved.ui.notes or { selectedRaid = "Custom/Misc", selectedId = nil, selectedBossByRaid = {}, sourceFilter = "All" }
+  FRT_Saved.ui.notes = FRT_Saved.ui.notes or {
+    selectedRaid = "Custom/Misc",
+    selectedId   = nil,
+    selectedBossByRaid = {},
+    sourceFilter = "All",
+    scopeFilter  = "All",
+  }
   FRT_Saved.ui.notes.selectedBossByRaid = FRT_Saved.ui.notes.selectedBossByRaid or {}
-  FRT_Saved.ui.notes.sourceFilter       = FRT_Saved.ui.notes.sourceFilter or "All"
+  FRT_Saved.ui.notes.sourceFilter = FRT_Saved.ui.notes.sourceFilter or "All"
+  FRT_Saved.ui.notes.scopeFilter  = FRT_Saved.ui.notes.scopeFilter  or FRT_Saved.ui.notes.sourceFilter or "All"
 end
 
 -- Channel selection (prefers guild, then raid, then party)
@@ -129,9 +136,13 @@ end
 
 function EP.FindNoteById(id)
   if not id then return nil end
+  local want = tostring(id)
   local arr = FRT_Saved.notes or {}
-  for i=1, table.getn(arr) do
-    if arr[i] and arr[i].id == id then return arr[i], i end
+  for i = 1, table.getn(arr) do
+    local n = arr[i]
+    if n and tostring(n.id) == want then
+      return n, i
+    end
   end
   return nil
 end
@@ -494,12 +505,25 @@ function EP.SaveAs()
 end
 
 function EP.DeleteNote()
-  if not S.currentId then if FRT.Print then FRT.Print("No note selected.") end return end
-  S.pending.deleteId = S.currentId
-  local n = EP.FindNoteById(S.currentId)
-  local ttl = (n and n.title and n.title ~= "" and n.title) and n.title or "(untitled)"
+  if not S.currentId then
+    if FRT.Print then FRT.Print("No note selected.") end
+    return
+  end
+
+  local id = S.currentId
+  local n, idx = EP.FindNoteById(id)
+  if not idx then
+    if FRT.Print then FRT.Print("Could not find selected note.") end
+    return
+  end
+
+  S.pending.deleteId    = id
+  S.pending.deleteIndex = idx
+
+  local ttl = (n and n.title and n.title ~= "" and n.title) or "(untitled)"
   if EP.ShowBlocker then EP.ShowBlocker() end
-  StaticPopup_Show("FRT_CONFIRM_DELETE_NOTE", ttl)
+  -- Pass a payload table; some clients don’t pass `self` reliably, so we also keep S.pending
+  StaticPopup_Show("FRT_CONFIRM_DELETE_NOTE", ttl, nil, { id = id, index = idx })
 end
 
 function EP.CanShareNow()
@@ -639,6 +663,9 @@ StaticPopupDialogs["FRT_UNSAVED_SWITCHNOTE"] = {
       elseif S.pending.sourceFilter then
         local sf = S.pending.sourceFilter; S.pending.sourceFilter = nil
         if EP.ApplySourceFilter then EP.ApplySourceFilter(sf) end
+      elseif S.pending.scopeFilter then
+        local sf = S.pending.scopeFilter; S.pending.scopeFilter = nil
+        if EP.ApplyScopeFilter then EP.ApplyScopeFilter(sf) end
       end
     end
 
@@ -674,23 +701,36 @@ StaticPopupDialogs["FRT_CONFIRM_DELETE_NOTE"] = {
   text = "Delete note: |cffffff00%s|r?\n|cffff4040This cannot be undone.|r",
   button1 = "Delete",
   button2 = "Cancel",
-  OnAccept = function()
-    if S.pending and S.pending.deleteId then
-      local _, delIndex = EP.FindNoteById and EP.FindNoteById(S.pending.deleteId)
-      if delIndex then
-        table.remove(FRT_Saved.notes, delIndex)
-        if FRT.Print then FRT.Print("Note deleted.") end
-        S.currentId = nil; if S.uiSV then S.uiSV.selectedId = nil end
-        if EP.RebuildList then EP.RebuildList() end
-        if EP.LoadSelected then EP.LoadSelected(nil) end
-        if EP.UpdateButtonsState then EP.UpdateButtonsState() end
-      end
-      S.pending.deleteId = nil
+  OnAccept = function(self)
+    local payload     = self and self.data
+    local targetId    = (type(payload)=="table" and payload.id)    or (S.pending and S.pending.deleteId)
+    local targetIndex = (type(payload)=="table" and payload.index) or (S.pending and S.pending.deleteIndex)
+
+    -- Try by id first
+    local _, delIndex = EP.FindNoteById and EP.FindNoteById(targetId)
+
+    -- Fallback to the captured index if it still points to the same id
+    if (not delIndex) and targetIndex and FRT_Saved.notes[targetIndex]
+       and tostring(FRT_Saved.notes[targetIndex].id) == tostring(targetId) then
+      delIndex = targetIndex
     end
+
+    if delIndex then
+      table.remove(FRT_Saved.notes, delIndex)
+      if FRT.Print then FRT.Print("Note deleted.") end
+      S.currentId = nil; if S.uiSV then S.uiSV.selectedId = nil end
+      if EP.RebuildList then EP.RebuildList() end
+      if EP.LoadSelected then EP.LoadSelected(nil) end
+      if EP.UpdateButtonsState then EP.UpdateButtonsState() end
+    else
+      if FRT.Print then FRT.Print("Could not find note to delete.") end
+    end
+
+    if S.pending then S.pending.deleteId = nil; S.pending.deleteIndex = nil end
     if EP.HideBlocker then EP.HideBlocker() end
   end,
-  OnCancel = function()
-    if S.pending then S.pending.deleteId = nil end
+  OnCancel = function(self)
+    if S.pending then S.pending.deleteId = nil; S.pending.deleteIndex = nil end
     if EP.HideBlocker then EP.HideBlocker() end
   end,
   timeout = 0, whileDead = 1, hideOnEscape = 1, showAlert = 0,
@@ -737,6 +777,8 @@ function EP.ApplySourceFilter(val)
   if EP.RebuildList then EP.RebuildList() end
   if EP.UpdateButtonsState then EP.UpdateButtonsState() end
 end
+
+EP.ApplyScopeFilter = EP.ApplyScopeFilter or EP.ApplySourceFilter
 
 local function InitBossFilterDropdown()
   local info
