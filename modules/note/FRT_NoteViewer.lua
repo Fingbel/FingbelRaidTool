@@ -5,8 +5,9 @@ FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
-local viewer, vresize, vlock
-local ed -- util return (has .SetTokens/.SetText/.Refresh, etc.)
+local viewer, vresize, vlock , vtitle
+local _pendingTitle = "FRT — Raid Note"
+local ed 
 
 function Note.UpdateViewerLockUI()
   if FRT_Saved.ui.viewer.locked then
@@ -44,7 +45,9 @@ function Note.ShowViewer()
   else
     FRT.SafeSetPoint(viewer, "CENTER", UIParent, "CENTER", 0, 0)
   end
-
+  if vtitle and _pendingTitle then
+    vtitle:SetText(_pendingTitle)
+  end
   Note.UpdateViewerLockUI()
   Note.UpdateViewerText()
 end
@@ -111,9 +114,9 @@ function Note.BuildViewer()
   end)
 
   -- Title (center)
-  local vt = topbar:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  vt:SetPoint("CENTER", 0, 0)
-  vt:SetText("FRT — Raid Note")
+  vtitle = topbar:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  vtitle:SetPoint("CENTER", 0, 0)
+  vtitle:SetText(_pendingTitle or "FRT — Raid Note")
 
   -- Close (parented to VIEWER so it closes the whole window)
   local vclose = CreateFrame("Button", "FRT_ViewerClose", viewer, "UIPanelCloseButton")
@@ -215,4 +218,13 @@ function Note.SetViewerTokens(tokens)
   if not ed then return end
   ed.SetTokens(tokens or {})
   if ed.Refresh then ed.Refresh() end
+end
+
+function Note.SetViewerTitle(s)
+  s = tostring(s or "")
+  if s == "" then s = "FRT — Raid Note" end
+  _pendingTitle = s
+  if vtitle and vtitle.SetText then
+    vtitle:SetText(s)
+  end
 end

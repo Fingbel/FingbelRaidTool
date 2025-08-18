@@ -84,11 +84,15 @@ local function WireNoteNetCallback()
 
     FRT.NoteNet.onRef = function(sender, meta, inChan)
       _refOriginById[meta.id or ""] = _classifyOrigin(sender, inChan)
-
+      
       local found
       if FRT.SharedLib and FRT.SharedLib.FindById then
         local note = FRT.SharedLib.FindById(meta.id)
         if note then found = note end
+      end
+      
+      if FRT.Note and FRT.Note.SetViewerTitle then
+        FRT.Note.SetViewerTitle(meta.title or "")
       end
 
       local function up(s) return string.upper(tostring(s or "")) end
@@ -106,8 +110,11 @@ local function WireNoteNetCallback()
       meta.owner  = sender
       meta.source = "shared"
       meta.origin = _refOriginById[meta.id or ""] or _classifyOrigin(sender, inChan)
-      -- NEW: stamp scope on received body
       meta.scope  = _classifyScope(sender, inChan)
+      
+      if FRT.Note and FRT.Note.SetViewerTitle then
+        FRT.Note.SetViewerTitle(meta.title or "")
+      end
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, text or "")
@@ -120,9 +127,12 @@ local function WireNoteNetCallback()
     FRT.NoteNet.onLibAdd = function(sender, meta, body, inChan)
       meta.owner  = sender
       meta.source = "shared"
-      meta.origin = _classifyOrigin(sender, inChan)
-      -- NEW: stamp scope on library replication
+      meta.origin = _classifyOrigin(sender, inChan)      
       meta.scope  = _classifyScope(sender, inChan)
+
+      if FRT.Note and FRT.Note.SetViewerTitle then
+        FRT.Note.SetViewerTitle(meta.title or "")
+      end
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
         FRT.SharedLib.Upsert(meta, body or "")

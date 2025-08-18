@@ -393,6 +393,9 @@ function EP.LoadSelected(id)
     end
     if S.bossInfoLabel then S.bossInfoLabel:SetText(n.boss or "General") end
     if S.titleBox and S.titleBox.SetText then S.titleBox:SetText(n.title or "") end
+    if FRT.Note and FRT.Note.SetViewerTitle then
+      FRT.Note.SetViewerTitle(S.titleBox:GetText() or "")
+    end
     if S.editor and S.editor.SetText then S.editor.SetText(n.text or "") end
     if EP.SetEditorEnabled then EP.SetEditorEnabled(true) end
   else
