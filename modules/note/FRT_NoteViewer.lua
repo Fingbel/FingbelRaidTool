@@ -5,6 +5,15 @@ FRT = FRT or {}
 FRT.Note = FRT.Note or {}
 local Note = FRT.Note
 
+--Hooking auto reparse on spec change
+if FRT and FRT.Role then
+  FRT.Role.OnChanged = function()
+    if FRT.Note and FRT.Note.UpdateViewerText then
+      FRT.Note.UpdateViewerText()
+    end
+  end
+end
+
 local viewer, vresize, vlock , vtitle
 local _pendingTitle = "FRT — Raid Note"
 local _pendingBoss = nil

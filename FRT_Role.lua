@@ -100,11 +100,17 @@ Role.School = "PHYS"
 
 Role._lastClass, Role._t1, Role._t2, Role._t3 = nil, nil, nil, nil
 
+local function _applyState(r,k,s)
+  local ch = (r ~= Role.Role) or (k ~= Role.Kind) or (s ~= Role.School)
+  Role.Role, Role.Kind, Role.School = r, k, s
+  if ch and Role.OnChanged then Role.OnChanged(r,k,s) end
+end
+
 function Role.Recalc()
   local class = ClassToken()
   local t1, t2, t3 = TalentPoints(1), TalentPoints(2), TalentPoints(3)
   local r, k, s = Role.Infer(class, t1, t2, t3)
-  Role.Role, Role.Kind, Role.School = r or "DPS", k or "", s or ""
+  _applyState(r or "DPS", k or "", s or "")
   Role._lastClass, Role._t1, Role._t2, Role._t3 = class, t1, t2, t3
 end
 
@@ -119,14 +125,6 @@ function Role.GetSplit()
 end
 
 -- ===== events =====
-
-
-local function dbg(msg)
-  if Role.Debug and DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffFRT Role|r: "..msg)
-  end
-end
-
 local function TalentSig()
   local _,_,a = GetTalentTabInfo(1)
   local _,_,b = GetTalentTabInfo(2)
@@ -150,10 +148,7 @@ function Role.RecalcIfChanged()
         DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffFRT Role|r: talents changed -> "..now.." ("
           ..after.." -> "..curr..")")
       end
-    end
-    if Role.OnChanged then
-      Role.OnChanged(Role.Role, Role.Kind, Role.School)
-    end
+    end    
   end
 end
 
