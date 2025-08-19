@@ -14,7 +14,17 @@ if FRT and FRT.Role then
   end
 end
 
-local viewer, vresize, vlock , vtitle
+local function ensureViewerSV()
+  FRT_Saved = FRT_Saved or {}
+  FRT_Saved.ui = FRT_Saved.ui or {}
+  local v = FRT_Saved.ui.viewer or {}
+  if v.locked  == nil then v.locked  = false end
+  if v.showAll == nil then v.showAll = false end
+  v.w = v.w or 320; v.h = v.h or 160
+  FRT_Saved.ui.viewer = v
+end
+
+local viewer, vresize, vlock , vtitle, vsall
 local _pendingTitle = "FRT — Raid Note"
 local _pendingBoss = nil
 local ed 
@@ -29,6 +39,7 @@ local function composeHeader(title, boss)
 end
 
 function Note.UpdateViewerLockUI()
+  ensureViewerSV()
   if FRT_Saved.ui.viewer.locked then
     if vresize then vresize:Hide() end
   else
@@ -52,10 +63,11 @@ function Note.UpdateViewerText()
 end
 
 function Note.ShowViewer()
+  ensureViewerSV()
   if not viewer then return end
   viewer:Show()
-
   local sv = FRT_Saved.ui.viewer
+
   if type(sv.w) == "number" and type(sv.h) == "number" then
     viewer:SetWidth(sv.w); viewer:SetHeight(sv.h)
   end
@@ -64,12 +76,16 @@ function Note.ShowViewer()
   else
     FRT.SafeSetPoint(viewer, "CENTER", UIParent, "CENTER", 0, 0)
   end
-   if vtitle then vtitle:SetText(composeHeader(_pendingTitle, _pendingBoss)) end
+  if vtitle then vtitle:SetText(composeHeader(_pendingTitle, _pendingBoss)) end
+  if vsall and vsall.SetChecked then
+    vsall:SetChecked((sv.showAll and 1) or 0)
+  end
   Note.UpdateViewerLockUI()
   Note.UpdateViewerText()
 end
 
 function Note.BuildViewer()
+  ensureViewerSV()
   viewer = CreateFrame("Frame", "FRT_Viewer", UIParent)
   viewer:SetWidth(320); viewer:SetHeight(160)
   viewer:SetFrameStrata("DIALOG")
@@ -141,6 +157,29 @@ function Note.BuildViewer()
   vclose:SetPoint("TOPRIGHT", viewer, "TOPRIGHT", 0, -BORDER + 1)
   vclose:SetFrameLevel(viewer:GetFrameLevel() + 10)   
   vclose:SetScript("OnClick", function() viewer:Hide() end)
+
+  -- ShowAll toggle (right side)
+  vsall = CreateFrame("CheckButton", "FRT_ViewerShowAll", topbar, "UICheckButtonTemplate")
+  vsall:SetWidth(18); vsall:SetHeight(18)
+  vsall:SetPoint("RIGHT", vclose, "LEFT", -6, 0)
+  local vsallText = getglobal(vsall:GetName().."Text"); if vsallText then vsallText:Hide() end
+  local vsallLabel = topbar:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+  vsallLabel:SetPoint("RIGHT", vsall, "LEFT", -4, 0)
+  vsallLabel:SetText("ShowAll")
+  vsall:SetFrameLevel(viewer:GetFrameLevel() + 10)
+  vsall:SetChecked((FRT_Saved.ui.viewer.showAll and 1) or 0)
+
+  -- 1.12: no self param; use `this` or the captured `vsall`
+  vsall:SetScript("OnClick", function()
+    ensureViewerSV()
+    local checked = (this and this.GetChecked and this:GetChecked()) and true or false
+    -- or: local checked = vsall:GetChecked() and true or false
+    FRT_Saved.ui.viewer.showAll = checked
+    Note.UpdateViewerText()
+    if FRT.Print then
+      FRT.Print("ShowAll: " .. (checked and "ON" or "OFF") .. ".")
+    end
+  end)
 
   -- === Content area (under topbar, inside the frame) ===
   local area = CreateFrame("Frame", nil, viewer)

@@ -129,6 +129,8 @@ do
     text = string.gsub(text, "\r\n", "\n")
     text = string.gsub(text, "\r", "\n")
 
+    local showAll = (FRT_Saved and FRT_Saved.ui and FRT_Saved.ui.viewer and FRT_Saved.ui.viewer.showAll) or false
+
     local active       = getActiveKeys()
     local blockVisible = true
 
@@ -171,7 +173,6 @@ do
             -- class icon
             elseif CLASS_TEXCOORD[upraw] then
               flushBuf(); emitIcon(CLASS_TEX, CLASS_TEXCOORD[upraw], 14, 14); i = bc + 1
-
             else
               -- generic colored placeholder
               local baseUP = upraw
@@ -187,12 +188,10 @@ do
         local sa, sb, sval = string.find(text, "^%[Section%s*=%s*([^%]]+)%]", i)
         if sa then
           local key = normalizeSectionKey(sval)
-          local visible = false
           if SECTIONS[key] or D.ClassColorsHex[key] or active[key] then
-            visible = (active[key] == true)
+            blockVisible = showAll or (active[key] == true)
           end
-          flushBuf()
-          blockVisible = visible
+          flushBuf()          
           if blockVisible then pushSectionSeparator(tokens, key, curFont) end
           i = sb + 1
 
