@@ -9,6 +9,8 @@
 FingbelRaidTool.lua
 FRT_Data.lua
 FRT_RaidData.lua
+FRT_Role.lua
+
 
 ui\FRT_RichScrollable.lua
 ui\FRT_ScrollableEdit.lua
@@ -26,4 +28,4 @@ modules\note\FRT_NoteParser.lua
 modules\note\FRT_NoteViewer.lua
 modules\note\FRT_NoteNet.lua
 
-FRT_Debug.lua
+debug\FRT_EventSniffer.lua

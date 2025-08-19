@@ -142,6 +142,7 @@ local core = CreateFrame("Frame")
 core:RegisterEvent("VARIABLES_LOADED")
 core:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" then
+        FRT.Role.OnLoad()
         ForEachModule(function(m)
             FRT.Print("Loading Module ")
             if m.OnLoad then m.OnLoad(m) end -- pass module table
