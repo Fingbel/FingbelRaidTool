@@ -16,6 +16,17 @@ local function titleCase(s)
   return (string.gsub(s, "^%l", string.upper))
 end
 
+-- token helpers for placeholders like {DRUID1}, {HEAL2}, etc.
+local function baseToken(raw)
+  local up = upper(raw or "")
+  up = string.gsub(up, "%d+$", "")  -- strip trailing digits
+  up = string.gsub(up, "_+$", "")   -- strip trailing underscores (safety)
+  return up
+end
+local function tokenSuffix(raw)
+  return string.match(tostring(raw or ""), "(%d+)$")
+end
+
 -- active-role keys for section gating
 local function getActiveKeys()
   local role   = (Role.GetRole   and Role.GetRole())   or ""
@@ -92,8 +103,9 @@ do
     if last and last.kind ~= "linebreak" then pushLine(tokens) end
   end
 
-  local function colorForPlaceholder(baseUP)
-    local canon = (D.RoleSynonyms and D.RoleSynonyms[baseUP]) or baseUP
+  local function colorForPlaceholderToken(raw)
+    local baseUP = baseToken(raw)
+    local canon  = (D.RoleSynonyms and D.RoleSynonyms[baseUP]) or baseUP
     if CLASS_HEX[canon] then return hex2rgb(CLASS_HEX[canon]) end
     if ROLE_HEX[canon]  then return hex2rgb(ROLE_HEX[canon])  end
     if ROLE_HEX[baseUP] then return hex2rgb(ROLE_HEX[baseUP]) end
@@ -157,7 +169,9 @@ do
         else
           local ac, bc, raw = string.find(text, "^%{([%w_]+)%}", i)
           if ac then
-            local upraw = upper(raw or "")
+            local upraw  = upper(raw or "")
+            local base   = baseToken(upraw)
+            local suffix = tokenSuffix(raw)
 
             -- dynamic placeholders
             if upraw == "ROLE" or upraw == "KIND" or upraw == "SCHOOL" or upraw == "CLASS" then
@@ -166,18 +180,34 @@ do
               if upraw == "KIND"   and Role.GetKind   then val = Role.GetKind()   end
               if upraw == "SCHOOL" and Role.GetSchool then val = Role.GetSchool() end
               if upraw == "CLASS"  then local _, c = UnitClass("player"); val = c or "?" end
-              local baseUP = upper(val or "")
-              flushBuf(); if blockVisible then pushText(tokens, val, colorForPlaceholder(baseUP), curFont) end
+              flushBuf()
+              if blockVisible then
+                pushText(tokens, val, colorForPlaceholderToken(val), curFont)
+              end
               i = bc + 1
 
-            -- class icon
-            elseif CLASS_TEXCOORD[upraw] then
-              flushBuf(); emitIcon(CLASS_TEX, CLASS_TEXCOORD[upraw], 14, 14); i = bc + 1
             else
-              -- generic colored placeholder
-              local baseUP = upraw
-              flushBuf(); if blockVisible then pushText(tokens, raw, colorForPlaceholder(baseUP), curFont) end
-              i = bc + 1
+              -- class icon (supports {DRUID1}, {MAGE2}, etc.): icon + numeric suffix
+              if CLASS_TEXCOORD[base] then
+                flushBuf()
+                if blockVisible then
+                  if suffix then
+                    -- Colored placeholder text: e.g. {SHAMAN1} prints "SHAMAN1" in class color
+                    pushText(tokens, raw, colorForPlaceholderToken(raw), curFont)
+                  else
+                    -- Pure class icon: e.g. {SHAMAN}
+                    emitIcon(CLASS_TEX, CLASS_TEXCOORD[base], 14, 14)
+                  end
+                end
+                i = bc + 1
+              else
+                -- generic colored placeholder (TANK1, HEAL2, RDPS3, etc.)
+                flushBuf()
+                if blockVisible then
+                  pushText(tokens, raw, colorForPlaceholderToken(raw), curFont)
+                end
+                i = bc + 1
+              end
             end
           else
             buf = buf .. "{"; i = i + 1
@@ -191,7 +221,7 @@ do
           if SECTIONS[key] or D.ClassColorsHex[key] or active[key] then
             blockVisible = showAll or (active[key] == true)
           end
-          flushBuf()          
+          flushBuf()
           if blockVisible then pushSectionSeparator(tokens, key, curFont) end
           i = sb + 1
 
