@@ -278,9 +278,9 @@ function EP.Build(parent)
   titleBox:SetText("")
   titleBox:SetScript("OnTextChanged", function()
     if not S.editorEnabled then return end
-    -- live-update the viewer title
     if FRT.Note and FRT.Note.SetViewerTitle then
-      FRT.Note.SetViewerTitle(titleBox:GetText() or "")
+      local boss = S.bossInfoLabel and S.bossInfoLabel:GetText() or ""
+      FRT.Note.SetViewerTitle(titleBox:GetText() or "", boss)
     end
     EP.UpdateDirtyFromUserEdit()
   end)
@@ -455,7 +455,8 @@ function EP.Build(parent)
   end
 
   if FRT.Note and FRT.Note.SetViewerTitle and S.titleBox then
-    FRT.Note.SetViewerTitle(S.titleBox:GetText() or "")
+    local boss = S.bossInfoLabel and S.bossInfoLabel:GetText() or ""
+    FRT.Note.SetViewerTitle(S.titleBox:GetText() or "", boss)
   end
 
   if S.editor and S.editor.edit and S.editor.edit.SetScript then

@@ -7,7 +7,17 @@ local Note = FRT.Note
 
 local viewer, vresize, vlock , vtitle
 local _pendingTitle = "FRT — Raid Note"
+local _pendingBoss = nil
 local ed 
+
+local function composeHeader(title, boss)
+  title = tostring(title or "")
+  boss  = tostring(boss or "")
+  if title ~= "" and boss ~= "" then return boss .. " — " .. title end
+  if title ~= "" then return title end
+  if boss  ~= "" then return boss end
+  return "FRT — Raid Note"
+end
 
 function Note.UpdateViewerLockUI()
   if FRT_Saved.ui.viewer.locked then
@@ -45,9 +55,7 @@ function Note.ShowViewer()
   else
     FRT.SafeSetPoint(viewer, "CENTER", UIParent, "CENTER", 0, 0)
   end
-  if vtitle and _pendingTitle then
-    vtitle:SetText(_pendingTitle)
-  end
+   if vtitle then vtitle:SetText(composeHeader(_pendingTitle, _pendingBoss)) end
   Note.UpdateViewerLockUI()
   Note.UpdateViewerText()
 end
@@ -116,7 +124,7 @@ function Note.BuildViewer()
   -- Title (center)
   vtitle = topbar:CreateFontString(nil, "ARTWORK", "GameFontNormal")
   vtitle:SetPoint("CENTER", 0, 0)
-  vtitle:SetText(_pendingTitle or "FRT — Raid Note")
+  vtitle:SetText(composeHeader(_pendingTitle, _pendingBoss))
 
   -- Close (parented to VIEWER so it closes the whole window)
   local vclose = CreateFrame("Button", "FRT_ViewerClose", viewer, "UIPanelCloseButton")
@@ -220,11 +228,13 @@ function Note.SetViewerTokens(tokens)
   if ed.Refresh then ed.Refresh() end
 end
 
-function Note.SetViewerTitle(s)
-  s = tostring(s or "")
-  if s == "" then s = "FRT — Raid Note" end
-  _pendingTitle = s
+function Note.SetViewerTitle(title, boss)
+  _pendingTitle = tostring(title or "")
+  _pendingBoss  = (boss ~= nil and tostring(boss)) or _pendingBoss
+  if _pendingTitle == "" and (not _pendingBoss or _pendingBoss == "") then
+    _pendingTitle = "FRT — Raid Note"
+  end
   if vtitle and vtitle.SetText then
-    vtitle:SetText(s)
+    vtitle:SetText(composeHeader(_pendingTitle, _pendingBoss))
   end
 end

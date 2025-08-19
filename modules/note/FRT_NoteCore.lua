@@ -92,7 +92,7 @@ local function WireNoteNetCallback()
       end
       
       if FRT.Note and FRT.Note.SetViewerTitle then
-        FRT.Note.SetViewerTitle(meta.title or "")
+        FRT.Note.SetViewerTitle(meta.title or "", meta.boss or "")
       end
 
       local function up(s) return string.upper(tostring(s or "")) end
@@ -113,7 +113,7 @@ local function WireNoteNetCallback()
       meta.scope  = _classifyScope(sender, inChan)
       
       if FRT.Note and FRT.Note.SetViewerTitle then
-        FRT.Note.SetViewerTitle(meta.title or "")
+        FRT.Note.SetViewerTitle(meta.title or "", meta.boss or "")
       end
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
@@ -131,7 +131,7 @@ local function WireNoteNetCallback()
       meta.scope  = _classifyScope(sender, inChan)
 
       if FRT.Note and FRT.Note.SetViewerTitle then
-        FRT.Note.SetViewerTitle(meta.title or "")
+        FRT.Note.SetViewerTitle(meta.title or "", meta.boss or "")
       end
 
       if FRT.SharedLib and FRT.SharedLib.Upsert then
